@@ -29,7 +29,36 @@ Each teammate needs:
 - Google account with Drive access
 - Hugging Face account
 
-Create a Hugging Face read token and store it as `HF_TOKEN` in Colab Secrets.
+### 2A. Make A Hugging Face Token
+
+1. Sign in at `https://huggingface.co/`.
+2. Open Settings.
+3. Open Access Tokens.
+4. Create a new token.
+5. Use a clear name such as `keelnet-colab`.
+6. Choose a `Read` token.
+7. Copy the token value right away.
+
+![1774432510097](image/experiment-guidelines/1774432510097.png)
+
+If Hugging Face shows the fine-grained token screen instead, keep it read-only and do not enable write or admin-style permissions.
+
+### 2B. Put The Token In Google Colab
+
+1. Open the Stage 1 notebook with a Colab kernel.
+2. Open the left sidebar in Colab.
+3. Click the key icon for `Secrets`.
+4. Add a new secret named `HF_TOKEN`.
+5. Paste your Hugging Face token as the value.
+6. Rerun the notebook setup cell.
+
+What you should see after rerunning the setup cell:
+
+- `Loaded HF_TOKEN from Colab secrets.`
+
+![1774432546823](image/experiment-guidelines/1774432546823.png)
+
+If you do not see the key icon, make sure you are really connected to a Colab kernel and not a normal local Jupyter kernel.
 
 ## 3. Get The Repo
 
