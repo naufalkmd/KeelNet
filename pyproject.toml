@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "keelnet"
+version = "0.1.0"
+description = "KeelNet Stage 1 experiment scaffold for grounded abstention on SQuAD 2.0"
+readme = "stages/01-grounded-abstention-baseline/README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "accelerate>=0.27",
+  "datasets>=2.18",
+  "numpy>=1.24",
+  "torch>=2.1",
+  "transformers>=4.40",
+]
+
+[project.scripts]
+keelnet-train = "keelnet.train:main"
+keelnet-eval = "keelnet.evaluate:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
