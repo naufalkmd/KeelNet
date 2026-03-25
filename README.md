@@ -77,8 +77,7 @@ For teammate setup, Colab, Drive, and experiment execution, see:
 The official team workflow for Stage 1 is:
 
 - edit the repo locally in VS Code
-- open the Stage 1 notebook with the Jupyter extension
-- connect that notebook to a Colab kernel
+- open the Stage 1 notebook in browser Google Colab for execution
 - rerun the setup cell after pushing code changes
 - save artifacts to Google Drive
 

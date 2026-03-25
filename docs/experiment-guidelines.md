@@ -3,7 +3,7 @@
 Use this guide to set up the official team workflow:
 
 1. edit locally in VS Code
-2. run the notebook with a Colab kernel
+2. run the notebook in browser Google Colab
 3. save artifacts to Google Drive
 4. sync code through GitHub
 
@@ -45,7 +45,7 @@ If Hugging Face shows the fine-grained token screen instead, keep it read-only a
 
 ### 2B. Put The Token In Google Colab
 
-1. Open the Stage 1 notebook with a Colab kernel.
+1. Open the Stage 1 notebook in browser Google Colab.
 2. Open the left sidebar in Colab.
 3. Click the key icon for `Secrets`.
 4. Add a new secret named `HF_TOKEN`.
@@ -58,7 +58,7 @@ What you should see after rerunning the setup cell:
 
 ![1774432546823](image/experiment-guidelines/1774432546823.png)
 
-If you do not see the key icon, make sure you are really connected to a Colab kernel and not a normal local Jupyter kernel.
+If you do not see the key icon, you are probably not in a real Colab runtime yet.
 
 ## 3. Get The Repo
 
@@ -73,14 +73,23 @@ git checkout -b yourname/stage1-work
 
 ## 4. Open The Notebook
 
-Open this notebook in VS Code:
+Edit this notebook in VS Code if you want:
 
 - [`stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`](../stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb)
 
 Then:
 
-1. connect it to a Colab kernel
+1. open the same notebook in browser **Google Colab**
 2. make sure the runtime uses GPU
+3. run it there, not in a normal local Jupyter kernel
+
+Important:
+
+- use VS Code for editing
+- use browser Colab for executing this notebook
+- this notebook depends on `google.colab`, Drive mount, and Colab Secrets
+
+![1774434899953](image/experiment-guidelines/1774434899953.png)
 
 ## 5. Set Up Drive
 
@@ -180,4 +189,4 @@ If something fails, check:
 
 ## 12. One-Line Summary
 
-Edit in VS Code, push to GitHub, rerun the setup cell, run on the Colab kernel, and save outputs to Drive.
+Edit in VS Code, push to GitHub, open the notebook in browser Colab, rerun the setup cell, and save outputs to Drive.

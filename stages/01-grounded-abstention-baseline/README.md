@@ -14,8 +14,8 @@ Teammate setup and shared experiment workflow:
 
 Official team workflow:
 
-- open this notebook locally in VS Code
-- connect it to a Colab kernel through the Jupyter extension
+- edit this notebook locally in VS Code if you want
+- run this notebook in browser Google Colab
 - let the notebook update `/content/KeelNet`
 - save artifacts to Google Drive
 
