@@ -1,0 +1,31 @@
+The current implementation supports two Stage 1 training modes:
+\begin{enumerate}[leftmargin=1.25em]
+  \item \textbf{Baseline.} Train only on answerable examples so the model is
+  optimized for standard extractive QA behavior.
+  \item \textbf{Abstain-aware.} Train on both answerable and unanswerable
+  examples so that unsupported cases are represented during supervision.
+\end{enumerate}
+
+Both modes use the same underlying extractive QA model family and share the
+same preprocessing and evaluation pipeline.
+At inference time, the system converts start and end logits into either an
+answer span or an abstention decision.
+For the abstain-aware configuration, a validation-selected null-score threshold
+is used to control the answer-versus-abstain trade-off.
+
+The purpose of Stage 1 is not to introduce a complicated control mechanism.
+Instead, it establishes whether explicit abstention training alone yields a
+better supported-answering profile than an answer-only baseline under a tightly
+controlled setting.
+
+The broader roadmap already anticipates later stages for:
+\begin{itemize}[leftmargin=1.25em]
+  \item evidence support verification,
+  \item confidence calibration,
+  \item unsupported-confidence control,
+  \item retrieval-grounded QA, and
+  \item adaptive constraint balancing.
+\end{itemize}
+
+Those stages are part of the research direction, but only the Stage 1 path is
+implemented end-to-end in the current codebase.

@@ -1,0 +1,29 @@
+The current project deliberately favors scope control over breadth.
+That is a strength for the first paper draft, but it also creates limitations
+that should be stated clearly.
+
+\paragraph{Current limitations.}
+\begin{itemize}[leftmargin=1.25em]
+  \item The active implementation is limited to Stage 1.
+  \item The task uses a single provided evidence passage rather than retrieved
+  evidence.
+  \item The action space is intentionally narrow and does not yet cover richer
+  support labels or multi-hop settings.
+  \item The current results will reflect one controlled dataset setup rather
+  than a broad claim about hallucination in general.
+\end{itemize}
+
+\paragraph{Why this is still useful.}
+Even with those constraints, the setup is valuable because it tests one
+defensible claim with clean supervision and interpretable failure modes.
+If Stage 1 cannot show a meaningful trade-off improvement, that is important
+negative evidence before investing in more complex later stages.
+
+\paragraph{Next paper-facing extensions.}
+Once Stage 1 is stable, the most natural paper extensions are:
+\begin{itemize}[leftmargin=1.25em]
+  \item adding support verification,
+  \item calibrating confidence against correctness and support,
+  \item testing retrieval noise, and
+  \item comparing adaptive balancing against simpler fixed baselines.
+\end{itemize}

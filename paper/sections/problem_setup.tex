@@ -1,0 +1,28 @@
+The current problem setting is evidence-grounded extractive question answering
+with a constrained binary action:
+\begin{equation}
+f(q, e) \rightarrow \{\text{answer span}, \abstain\},
+\end{equation}
+where $q$ is a question and $e$ is a single evidence passage.
+
+The Stage 1 scope is intentionally strict:
+\begin{itemize}[leftmargin=1.25em]
+  \item Dataset: SQuAD~2.0 only.
+  \item Input: one question and one evidence passage.
+  \item Output: extractive answer span or \abstain.
+  \item Current implementation goal: reduce unsupported answers without sharply
+  degrading performance on answerable questions.
+\end{itemize}
+
+This scope excludes retrieval, multi-hop reasoning, custom architectures,
+long-form generation, and broader claim-level verification.
+Those extensions are part of later roadmap stages, but they are out of scope
+for the current paper draft's core experimental claim.
+
+We evaluate the task with metrics that separate utility from caution.
+For answerable examples, we track exact match and token-level F1.
+For unanswerable examples, we track unsupported answer rate and abstention
+quality.
+This makes it possible to study the trade-off between being useful and being
+appropriately cautious instead of collapsing everything into a single accuracy
+number.

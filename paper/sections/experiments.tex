@@ -1,0 +1,41 @@
+The active experiments are run from the project notebooks and Python modules in
+the repository.
+The current implementation uses a compact extractive QA setup with a default
+DistilBERT backbone and SQuAD~2.0 preprocessing.
+
+\paragraph{Dataset split.}
+The training pipeline creates deterministic train, validation, and development
+splits from SQuAD~2.0.
+For the answer-only baseline, the training set is restricted to answerable
+examples.
+For the abstain-aware setting, both answerable and unanswerable cases are kept.
+
+\paragraph{Evaluation.}
+Model outputs are post-processed into final decisions and scored with:
+\begin{itemize}[leftmargin=1.25em]
+  \item answerable exact match,
+  \item answerable F1,
+  \item overall exact match,
+  \item overall F1,
+  \item unsupported answer rate, and
+  \item abstain precision, recall, and F1.
+\end{itemize}
+
+\paragraph{Execution workflow.}
+The current team workflow runs experiments in browser Google Colab while
+editing source code locally in VS Code.
+Artifacts are saved to Google Drive, and code changes are synchronized through
+Git branches.
+This paper draft should eventually summarize only the stable final settings
+rather than the full engineering workflow.
+
+\paragraph{What to lock before the final paper.}
+Before turning this draft into a submission-ready paper, we should freeze:
+\begin{itemize}[leftmargin=1.25em]
+  \item the final model checkpoint choice,
+  \item the exact threshold-selection policy,
+  \item the final metric table,
+  \item at least one qualitative error analysis slice, and
+  \item the figure or table that best shows the utility-versus-abstention
+  trade-off.
+\end{itemize}

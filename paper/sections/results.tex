@@ -1,0 +1,34 @@
+Table~\ref{tab:stage1-main-results} is a placeholder for the main Stage 1
+comparison.
+It should be filled only after the team agrees on the stable runs to report.
+
+\begin{table}[t]
+  \centering
+  \caption{Main Stage 1 comparison between the answer-only baseline and the
+  abstain-aware model. Replace the placeholder values once the final runs are
+  selected.}
+  \label{tab:stage1-main-results}
+  \begin{tabular}{lcccc}
+    \toprule
+    Model & Answerable F1 & Unsupported Rate & Abstain F1 & Notes \\
+    \midrule
+    Baseline & TBD & TBD & N/A or TBD & Answer-only training \\
+    Abstain-aware & TBD & TBD & TBD & Explicit abstention supervision \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The final version of this section should answer three questions:
+\begin{enumerate}[leftmargin=1.25em]
+  \item Does abstention supervision reduce unsupported answers?
+  \item How much answer quality is preserved on answerable examples?
+  \item Is the observed gain large enough to justify the extra abstain-aware
+  machinery?
+\end{enumerate}
+
+Good additions for the final paper include:
+\begin{itemize}[leftmargin=1.25em]
+  \item a threshold analysis plot,
+  \item a short qualitative comparison of failure cases, and
+  \item a compact summary of where the baseline still fails.
+\end{itemize}
