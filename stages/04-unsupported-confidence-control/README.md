@@ -22,11 +22,9 @@ Reduce confident unsupported answers without collapsing usefulness.
 
 ## Notebook Policy
 
-Use Google Colab as the default notebook kernel for this stage.
+Use the same VS Code plus Colab kernel workflow as Stage 1.
 
-Place notebooks in:
-
-- `notebooks/`
+Only add a notebook file when this stage becomes active.
 
 ## Handoff Condition
 

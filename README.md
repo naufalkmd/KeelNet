@@ -69,12 +69,13 @@ For teammate setup, Colab, Drive, and experiment execution, see:
 
 ## Running The Stage 1 Scaffold
 
-The package currently exposes two CLI entry points:
+The official team workflow for Stage 1 is:
 
-- `keelnet-train`
-- `keelnet-eval`
-
-Install the project in your environment, then run those commands against the Stage 1 setup as the implementation fills out.
+- edit the repo locally in VS Code
+- open the Stage 1 notebook with the Jupyter extension
+- connect that notebook to a Colab kernel
+- rerun the setup cell after pushing code changes
+- save artifacts to Google Drive
 
 If you are onboarding a teammate, start with:
 

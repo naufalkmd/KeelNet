@@ -12,6 +12,13 @@ Teammate setup and shared experiment workflow:
 
 - `../../docs/experiment-guidelines.md`
 
+Official team workflow:
+
+- open this notebook locally in VS Code
+- connect it to a Colab kernel through the Jupyter extension
+- let the notebook update `/content/KeelNet`
+- save artifacts to Google Drive
+
 This experiment does **not** try to solve hallucination in general.
 
 It tests one narrow claim:

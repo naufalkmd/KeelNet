@@ -2,16 +2,16 @@
 
 This folder separates the roadmap into one working area per stage.
 
-Each stage folder follows the same shape:
+Keep each stage folder minimal.
 
-- `README.md`
-  - stage objective, inputs, outputs, metrics, and stop condition
-- `notebooks/`
-  - Google Colab notebooks or notebook placeholders
-- `notes/`
-  - experiment notes, failure analysis, and design decisions
-- `outputs/`
-  - run artifacts, metrics dumps, and checkpoints
+Default rule:
+
+- keep the stage `README.md`
+- add a notebook only when that stage becomes active
+- add result files only when they are actually used
+- keep experiment artifacts in Google Drive, not inside the repo
+
+Avoid creating empty placeholder folders such as `notes/`, `outputs/`, or `notebooks/` for inactive stages.
 
 Stages:
 
@@ -31,6 +31,12 @@ Interpretation:
 The current active implementation stage is:
 
 - `01-grounded-abstention-baseline`
+
+Current active stage files:
+
+- `README.md`
+- `results-template.md`
+- `notebooks/google-colab.ipynb`
 
 ## Collaboration Branching
 
