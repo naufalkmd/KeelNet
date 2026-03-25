@@ -84,7 +84,11 @@ Then:
 
 ## 5. Set Up Drive
 
-Use a Drive path like:
+Use a shared Drive path like:
+
+- `/content/drive/Shareddrives/YourTeamDrive/KeelNet`
+
+If you are working alone temporarily, you can fall back to:
 
 - `/content/drive/MyDrive/KeelNet`
 
@@ -104,7 +108,7 @@ Do not mix these up:
 
 1. local VS Code repo: where you edit
 2. `/content/KeelNet`: the Colab execution copy
-3. Google Drive: where artifacts are saved
+3. shared Google Drive: where artifacts are saved
 
 Important:
 
