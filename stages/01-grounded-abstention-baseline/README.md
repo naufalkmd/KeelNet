@@ -14,10 +14,12 @@ Teammate setup and shared experiment workflow:
 
 Official team workflow:
 
-- edit this notebook locally in VS Code if you want
-- run this notebook in browser Google Colab
-- let the notebook update `/content/KeelNet`
-- save artifacts to Google Drive
+- open this notebook in browser Google Colab from the branch you want to run
+- run the notebook in Colab
+- edit code locally in VS Code when needed
+- commit and push changes to GitHub
+- rerun the setup cell so `/content/KeelNet` updates
+- repeat until Stage 1 succeeds
 
 This experiment does **not** try to solve hallucination in general.
 

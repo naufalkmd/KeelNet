@@ -76,9 +76,11 @@ For teammate setup, Colab, Drive, and experiment execution, see:
 
 The official team workflow for Stage 1 is:
 
-- edit the repo locally in VS Code
-- open the Stage 1 notebook in browser Google Colab for execution
-- rerun the setup cell after pushing code changes
+- open the Stage 1 notebook in browser Google Colab from the GitHub branch you want to run
+- run the notebook in Colab
+- edit code locally in VS Code when needed
+- commit and push changes to GitHub
+- rerun the setup cell after pushing so `/content/KeelNet` updates
 - save artifacts to Google Drive
 
 If you are onboarding a teammate, start with:

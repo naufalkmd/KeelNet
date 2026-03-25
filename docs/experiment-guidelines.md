@@ -2,10 +2,19 @@
 
 Use this guide to set up the official team workflow:
 
-1. edit locally in VS Code
-2. run the notebook in browser Google Colab
-3. save artifacts to Google Drive
-4. sync code through GitHub
+1. open the notebook in browser Google Colab from the correct GitHub branch
+2. run the notebook in Colab
+3. edit code locally in VS Code when needed
+4. commit and push changes to GitHub
+5. rerun the setup cell in Colab
+6. repeat until the stage succeeds
+
+Before the first notebook run, do the key and Hugging Face setup in this order:
+
+1. make a Hugging Face token
+2. open the notebook in browser Google Colab
+3. add the token to Colab Secrets as `HF_TOKEN`
+4. then run the setup cell
 
 Also read:
 
@@ -29,7 +38,7 @@ Each teammate needs:
 - Google account with Drive access
 - Hugging Face account
 
-### 2A. Make A Hugging Face Token
+## 3. Make A Hugging Face Token
 
 1. Sign in at `https://huggingface.co/`.
 2. Open Settings.
@@ -43,7 +52,27 @@ Each teammate needs:
 
 If Hugging Face shows the fine-grained token screen instead, keep it read-only and do not enable write or admin-style permissions.
 
-### 2B. Put The Token In Google Colab
+## 4. Open The Notebook In Colab
+
+Open it in browser Google Colab like this:
+
+1. open `https://colab.google.com/`
+2. click `GitHub`
+3. choose `naufalkmd/KeelNet`
+4. switch to the branch you want to run
+5. open `stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`
+6. make sure the runtime uses GPU
+7. do not run the setup cell yet if `HF_TOKEN` is not in Colab Secrets
+
+Important:
+
+- use browser Colab for executing this notebook
+- use VS Code for editing code between notebook runs
+- this notebook depends on `google.colab`, Drive mount, and Colab Secrets
+
+![1774434899953](image/experiment-guidelines/1774434899953.png)
+
+## 5. Put The Token In Google Colab
 
 1. Open the Stage 1 notebook in browser Google Colab.
 2. Open the left sidebar in Colab.
@@ -60,7 +89,7 @@ What you should see after rerunning the setup cell:
 
 If you do not see the key icon, you are probably not in a real Colab runtime yet.
 
-## 3. Get The Repo
+## 6. Prepare Local Editing
 
 Clone the repo locally and switch to the correct branch:
 
@@ -71,35 +100,13 @@ git checkout stage/01-grounded-abstention-baseline
 git checkout -b yourname/stage1-work
 ```
 
-## 4. Open The Notebook
+## 7. Set Up Drive
 
-Edit this notebook in VS Code if you want:
-
-- [`stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`](../stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb)
-
-Then:
-
-1. open the same notebook in browser **Google Colab**
-2. make sure the runtime uses GPU
-3. run it there, not in a normal local Jupyter kernel
-
-Important:
-
-- use VS Code for editing
-- use browser Colab for executing this notebook
-- this notebook depends on `google.colab`, Drive mount, and Colab Secrets
-
-![1774434899953](image/experiment-guidelines/1774434899953.png)
-
-## 5. Set Up Drive
-
-Use a shared Drive path like:
-
-- `/content/drive/Shareddrives/YourTeamDrive/KeelNet`
-
-If you are working alone temporarily, you can fall back to:
+Use this Drive path:
 
 - `/content/drive/MyDrive/KeelNet`
+
+Share the `KeelNet` folder in your Google Drive with your teammates so they can see the saved artifacts.
 
 The notebook saves outputs under:
 
@@ -111,32 +118,37 @@ Example:
 
 - `naufal-stage1-20260325-a`
 
-## 6. Understand The Three Places
+## 8. Understand The Three Places
 
 Do not mix these up:
 
 1. local VS Code repo: where you edit
 2. `/content/KeelNet`: the Colab execution copy
-3. shared Google Drive: where artifacts are saved
+3. `/content/drive/MyDrive/KeelNet`: the shared artifact folder
 
 Important:
 
 - local file edits do not automatically update `/content/KeelNet`
 - Drive is for artifacts, not the repo
 
-## 7. Follow The Required Sync Loop
+## 9. Use This Repeat Loop
 
-Every time you change code locally:
+Use this same loop during the whole stage:
 
-1. edit locally in VS Code
-2. commit locally
-3. push to GitHub
-4. rerun the notebook setup cell
-5. then run training or evaluation
+1. open the notebook in browser Colab from the correct GitHub branch
+2. run the setup cell
+3. run the config cell
+4. run the test cell
+5. if something needs to change, edit the code locally in VS Code
+6. commit your changes locally
+7. push your branch to GitHub
+8. rerun the setup cell in Colab so `/content/KeelNet` updates
+9. rerun the cells you need
+10. repeat until the stage succeeds
 
-If you skip step 4, Colab may still run old code.
+If you skip step 8, Colab may still run old code.
 
-## 8. Run The Notebook In This Order
+## 10. Run The Notebook In This Order
 
 For Stage 1, run:
 
@@ -153,7 +165,7 @@ Before a full run, do a smoke test with smaller:
 - `MAX_TRAIN_SAMPLES`
 - `MAX_EVAL_SAMPLES`
 
-## 9. Check These Values Before Training
+## 11. Check These Values Before Training
 
 After the config cell, confirm:
 
@@ -162,7 +174,7 @@ After the config cell, confirm:
 3. `Run output dir` points to your unique run folder
 4. `CUDA available: True` for full runs
 
-## 10. Save And Report Results
+## 12. Save And Report Results
 
 For each completed run, record:
 
@@ -176,7 +188,7 @@ For Stage 1, fill in:
 
 - [`stages/01-grounded-abstention-baseline/results-template.md`](../stages/01-grounded-abstention-baseline/results-template.md)
 
-## 11. Quick Troubleshooting
+## 13. Quick Troubleshooting
 
 If something fails, check:
 
@@ -187,6 +199,6 @@ If something fails, check:
 5. is the runtime on GPU?
 6. is `HF_TOKEN` loaded?
 
-## 12. One-Line Summary
+## 14. One-Line Summary
 
-Edit in VS Code, push to GitHub, open the notebook in browser Colab, rerun the setup cell, and save outputs to Drive.
+Open the notebook in browser Colab from the correct GitHub branch, run it there, edit code in VS Code, push changes, rerun the setup cell, and repeat.
