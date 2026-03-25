@@ -23,6 +23,7 @@ The broader roadmap lives in:
 
 - `stages/README.md`
 - `docs/hallucination-project-proposal.md`
+- `docs/experiment-guidelines.md`
 
 ## Repository Layout
 
@@ -62,6 +63,10 @@ Suggested workflow:
 4. Merge validated stage work into `collab/team-sync`.
 5. Merge stable work from `collab/team-sync` into `main`.
 
+For teammate setup, Colab, Drive, and experiment execution, see:
+
+- `docs/experiment-guidelines.md`
+
 ## Running The Stage 1 Scaffold
 
 The package currently exposes two CLI entry points:
@@ -70,3 +75,8 @@ The package currently exposes two CLI entry points:
 - `keelnet-eval`
 
 Install the project in your environment, then run those commands against the Stage 1 setup as the implementation fills out.
+
+If you are onboarding a teammate, start with:
+
+- `docs/experiment-guidelines.md`
+- `stages/01-grounded-abstention-baseline/README.md`

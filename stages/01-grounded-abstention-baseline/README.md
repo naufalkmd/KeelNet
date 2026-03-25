@@ -8,6 +8,10 @@ Colab notebook:
 
 - `notebooks/google-colab.ipynb`
 
+Teammate setup and shared experiment workflow:
+
+- `../../docs/experiment-guidelines.md`
+
 This experiment does **not** try to solve hallucination in general.
 
 It tests one narrow claim:
