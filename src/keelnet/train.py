@@ -26,6 +26,7 @@ from keelnet.config import (
     RUN_MODES,
 )
 from keelnet.data import load_stage1_splits, prepare_train_features
+from keelnet.hf_compat import trainer_processing_kwargs
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -92,8 +93,8 @@ def main() -> None:
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        tokenizer=tokenizer,
         data_collator=DefaultDataCollator(),
+        **trainer_processing_kwargs(Trainer, tokenizer),
     )
     trainer.train()
     trainer.save_model()

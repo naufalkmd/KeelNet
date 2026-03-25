@@ -20,6 +20,7 @@ from keelnet.config import (
     RUN_MODES,
 )
 from keelnet.data import build_reference_index, load_stage1_splits, prepare_eval_features
+from keelnet.hf_compat import trainer_processing_kwargs
 from keelnet.metrics import compute_stage1_metrics
 from keelnet.postprocess import postprocess_qa_predictions
 
@@ -123,7 +124,7 @@ def main() -> None:
             per_device_eval_batch_size=args.eval_batch_size,
             report_to=[],
         ),
-        tokenizer=tokenizer,
+        **trainer_processing_kwargs(Trainer, tokenizer),
     )
 
     validation_examples = splits["validation"]
