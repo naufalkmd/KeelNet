@@ -71,7 +71,11 @@ def compute_stage1_metrics(
     predictions: Mapping[str, Mapping[str, Any]],
     references: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, float]:
-    """Compute Stage 1 metrics as percentages."""
+    """Compute Stage 1 metrics as percentages.
+
+    The overall metrics are decision-aware: a correct abstention on an
+    unanswerable example receives full credit instead of being forced to zero.
+    """
 
     answerable_total = 0
     unanswerable_total = 0
@@ -97,7 +101,10 @@ def compute_stage1_metrics(
 
         em = 0.0
         f1 = 0.0
-        if not predicted_abstain and gold_answers:
+        if predicted_abstain and gold_abstain:
+            em = 1.0
+            f1 = 1.0
+        elif not predicted_abstain and gold_answers:
             em = metric_max_over_ground_truths(exact_match_score, answer_text, gold_answers)
             f1 = metric_max_over_ground_truths(f1_score, answer_text, gold_answers)
 

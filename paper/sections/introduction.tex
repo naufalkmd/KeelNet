@@ -25,6 +25,14 @@ That hypothesis is narrow enough to evaluate cleanly, but still meaningful as a
 first step toward a broader program on grounded answering, support verification,
 and calibrated uncertainty.
 
+This framing is also consistent with recent work arguing that hallucination
+persists partly because modern evaluation pipelines reward guessing more than
+appropriate uncertainty \citep{kalai2025why}.
+Our contribution is narrower and more operational:
+rather than explaining hallucination in general, Stage 1 tests whether an
+evidence-grounded QA system can be trained and evaluated so that abstention is
+treated as a useful target behavior instead of a failure by default.
+
 This LaTeX scaffold is intentionally written as a living project paper.
 Some sections already reflect stable design decisions, while others are
 structured to absorb final metrics, figures, and ablations once the

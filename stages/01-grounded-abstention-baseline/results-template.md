@@ -15,6 +15,7 @@ Fill this in only after both runs are complete.
 
 - Run A threshold: not applicable
 - Run B validation-selected threshold:
+- Add the dev threshold-sweep figure and note whether the selected threshold sits on a sensible trade-off point.
 
 ## Quick Verdict
 

@@ -1,15 +1,24 @@
-\documentclass[11pt]{article}
+\documentclass[11pt,twocolumn]{article}
 
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage[margin=1in]{geometry}
+\usepackage[protrusion=true,expansion=false]{microtype}
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{tabularx}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{enumitem}
+\usepackage{caption}
+\usepackage{xurl}
 \usepackage{hyperref}
 \usepackage[numbers,sort&compress]{natbib}
+
+\captionsetup{font=small, labelfont=bf}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\setlength{\columnsep}{0.25in}
+\setlength{\emergencystretch}{3em}
 
 \hypersetup{
   colorlinks=true,
@@ -20,10 +29,12 @@
 
 \newcommand{\system}{KeelNet}
 \newcommand{\abstain}{\textsc{abstain}}
+\newcommand{\modelname}{\nolinkurl{distilbert-base-uncased}}
+\newcommand{\autoqaclass}{\texttt{AutoModelForQuestionAnswering}}
 
 \title{\system: Controlled Abstention for Evidence-Grounded Question Answering}
 \author{
-  Author 1 \and
+  Naufal M. Kamaruddin \and
   Author 2 \and
   Author 3
 }

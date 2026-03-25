@@ -15,11 +15,13 @@ Model outputs are post-processed into final decisions and scored with:
 \begin{itemize}[leftmargin=1.25em]
   \item answerable exact match,
   \item answerable F1,
-  \item overall exact match,
-  \item overall F1,
+  \item decision-aware overall exact match,
+  \item decision-aware overall F1,
   \item unsupported answer rate, and
   \item abstain precision, recall, and F1.
 \end{itemize}
+The decision-aware overall metrics give full credit to correct abstentions on
+unanswerable examples, so they do not penalize uncertainty by construction.
 
 \paragraph{Execution workflow.}
 The current team workflow runs experiments in browser Google Colab while

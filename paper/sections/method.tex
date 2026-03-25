@@ -1,31 +1,188 @@
-The current implementation supports two Stage 1 training modes:
+Stage 1 uses a standard extractive question answering architecture with a
+binary external decision:
+the system must either return an answer span from the passage or output
+\abstain.
+The mechanism is intentionally simple.
+Rather than introducing a separate verifier or controller at this stage, the
+project asks whether abstention can already emerge from standard extractive QA
+supervision when unanswerable cases are represented correctly during training.
+
+\subsection{Encoder and QA heads}
+
+Let the input be a question $q$ and a passage $p$.
+After tokenization, the model receives a single packed sequence of the form
+\begin{equation}
+  x = [\mathrm{CLS}], q, [\mathrm{SEP}], p, [\mathrm{SEP}].
+\end{equation}
+
+The encoder produces contextual token representations
+\begin{equation}
+  h_1, h_2, \dots, h_T = \mathrm{Enc}_{\theta}(x),
+\end{equation}
+where $T$ is the tokenized sequence length.
+In the default setup, the encoder is initialized from the DistilBERT checkpoint
+\modelname.
+The implementation goes through the Hugging Face \autoqaclass{} interface so
+the backbone can be swapped later.
+
+The question answering head is the standard two-logit extractive head.
+For each token representation $h_t$, the model predicts:
+\begin{align}
+  s_t &= w_s^\top h_t + b_s, \\
+  e_t &= w_e^\top h_t + b_e,
+\end{align}
+where $s_t$ is the start logit and $e_t$ is the end logit for token $t$.
+
+For a candidate span $(i, j)$ with $i \leq j$, the raw span score is
+\begin{equation}
+  S(i, j) = s_i + e_j.
+\end{equation}
+
+This is the core deep learning mechanism of Stage 1:
+the encoder learns a contextual representation of the question-passage pair,
+and the two linear heads learn where the answer should begin and end.
+
+\subsection{Training targets}
+
+The project compares two training modes under the same architecture,
+preprocessing, and optimization settings.
+
+\paragraph{Baseline mode.}
+The baseline is trained only on answerable examples.
+This makes it a standard extractive QA model:
+every training case has a supervised span target inside the passage.
+
+\paragraph{Abstain-aware mode.}
+The abstain-aware model is trained on both answerable and unanswerable
+examples.
+For answerable examples, the targets are the gold start and end token
+positions, just as in the baseline.
+For unanswerable examples, both the start and end targets are mapped to the
+\(\mathrm{CLS}\) position.
+
+This matters because it turns abstention into a first-class supervised outcome
+without changing the external architecture.
+The model is not given a separate abstention head.
+Instead, it learns to use the score of the \(\mathrm{CLS}\) token as a null or
+no-answer signal.
+
+The optimization objective is the standard averaged cross-entropy loss over
+start and end targets:
+\begin{equation}
+  \mathcal{L}
+  =
+  \frac{1}{2}
+  \Big(
+    \mathrm{CE}(s, y^{\mathrm{start}})
+    +
+    \mathrm{CE}(e, y^{\mathrm{end}})
+  \Big),
+\end{equation}
+where \(y^{\mathrm{start}}\) and \(y^{\mathrm{end}}\) are the gold token
+indices.
+For unanswerable examples in the abstain-aware setting,
+\begin{equation}
+  y^{\mathrm{start}} = y^{\mathrm{end}} = c,
+\end{equation}
+with $c$ denoting the \(\mathrm{CLS}\) index.
+
+\subsection{Long-context handling}
+
+Because passages can exceed the maximum encoder length, Stage 1 uses the
+standard sliding-window extractive QA preprocessing strategy.
+Each example may be expanded into multiple overlapping features with a fixed
+maximum sequence length and document stride.
+During training, each feature receives span supervision relative to its own
+window.
+During evaluation, the pipeline keeps the metadata needed to map feature-level
+predictions back to the original example.
+
+This implementation detail is important in deep learning terms because the
+model is trained over token windows rather than over raw passages directly.
+The final example-level prediction is therefore an aggregation over
+feature-level start and end logits.
+
+\subsection{Inference mechanism}
+
+At inference time, the model produces start and end logits for every feature of
+an example.
+Stage 1 then computes two competing quantities:
 \begin{enumerate}[leftmargin=1.25em]
-  \item \textbf{Baseline.} Train only on answerable examples so the model is
-  optimized for standard extractive QA behavior.
-  \item \textbf{Abstain-aware.} Train on both answerable and unanswerable
-  examples so that unsupported cases are represented during supervision.
+  \item the best valid answer span score across all candidate spans and all
+  windows, and
+  \item the best null score, defined as the sum of the start and end logits at
+  the \(\mathrm{CLS}\) position.
 \end{enumerate}
 
-Both modes use the same underlying extractive QA model family and share the
-same preprocessing and evaluation pipeline.
-At inference time, the system converts start and end logits into either an
-answer span or an abstention decision.
-For the abstain-aware configuration, a validation-selected null-score threshold
-is used to control the answer-versus-abstain trade-off.
+If the best span is \((i^\star, j^\star)\), then the best answer score is
+\begin{equation}
+  S_{\mathrm{span}}^\star
+  =
+  \max_{i, j \in \mathcal{V}} \; S(i, j),
+\end{equation}
+where \(\mathcal{V}\) contains only valid spans that satisfy the ordering and
+maximum-answer-length constraints.
 
-The purpose of Stage 1 is not to introduce a complicated control mechanism.
-Instead, it establishes whether explicit abstention training alone yields a
-better supported-answering profile than an answer-only baseline under a tightly
-controlled setting.
+The null score is
+\begin{equation}
+  S_{\varnothing}
+  =
+  s_c + e_c,
+\end{equation}
+again using the \(\mathrm{CLS}\) position \(c\).
 
-The broader roadmap already anticipates later stages for:
+The baseline model always outputs the highest-scoring span.
+The abstain-aware model compares the null score against the best span through a
+margin:
+\begin{equation}
+  \Delta = S_{\varnothing} - S_{\mathrm{span}}^\star.
+\end{equation}
+
+The final decision rule is:
+\begin{equation}
+  \hat{y}
+  =
+  \begin{cases}
+    \abstain, & \text{if } \Delta > \tau, \\
+    \text{best span}, & \text{otherwise,}
+  \end{cases}
+\end{equation}
+where \(\tau\) is a validation-selected threshold.
+
+Conceptually, this means Stage 1 does not learn a symbolic rule for when to
+refuse.
+It learns a representation in which the no-answer state competes directly
+against answer spans in the same scoring space.
+
+\subsection{Threshold selection}
+
+The abstention threshold is not fixed by hand in the default evaluation path.
+Instead, the code performs a simple search over a bounded range on the
+validation split.
+For each candidate threshold, the system post-processes predictions and
+measures Stage 1 metrics.
+The current implementation selects the threshold by prioritizing abstain
+\(F_1\), with answerable \(F_1\) used as a secondary tie-breaker.
+
+This choice reflects the Stage 1 research question.
+The project is not only asking whether the model can refuse more often; it is
+asking whether it can reduce unsupported answers while preserving usefulness on
+answerable examples.
+
+\subsection{What Stage 1 proves}
+
+From a deep learning perspective, Stage 1 is a representation and decision
+control test.
+It asks whether a standard extractive QA network, with no additional verifier
+and no retrieval pipeline, can be pushed toward better answer-versus-abstain
+behavior purely through:
 \begin{itemize}[leftmargin=1.25em]
-  \item evidence support verification,
-  \item confidence calibration,
-  \item unsupported-confidence control,
-  \item retrieval-grounded QA, and
-  \item adaptive constraint balancing.
+  \item different supervision over answerable versus unanswerable cases,
+  \item a shared encoder and span head,
+  \item the \(\mathrm{CLS}\)-based null mechanism, and
+  \item thresholded post-processing over the learned logit space.
 \end{itemize}
 
-Those stages are part of the research direction, but only the Stage 1 path is
-implemented end-to-end in the current codebase.
+If this works, then later stages can build on a meaningful base mechanism
+instead of introducing extra components before the basic abstention behavior is
+understood.

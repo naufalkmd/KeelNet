@@ -40,6 +40,8 @@ class MetricsTest(unittest.TestCase):
         self.assertEqual(metrics["unanswerable_count"], 2.0)
         self.assertAlmostEqual(metrics["answerable_em"], 50.0)
         self.assertAlmostEqual(metrics["answerable_f1"], 50.0)
+        self.assertAlmostEqual(metrics["overall_em"], 50.0)
+        self.assertAlmostEqual(metrics["overall_f1"], 50.0)
         self.assertAlmostEqual(metrics["unsupported_answer_rate"], 50.0)
         self.assertAlmostEqual(metrics["abstain_precision"], 50.0)
         self.assertAlmostEqual(metrics["abstain_recall"], 50.0)

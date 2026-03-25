@@ -73,10 +73,8 @@ def _search_threshold(
     threshold_min: float,
     threshold_max: float,
     threshold_step: float,
-) -> tuple[float, dict[str, float]]:
-    best_threshold = 0.0
-    best_metrics: dict[str, float] | None = None
-
+) -> tuple[float, dict[str, float], list[dict[str, float]]]:
+    sweep: list[dict[str, float]] = []
     current = threshold_min
     while current <= threshold_max + 1e-9:
         predictions = postprocess_qa_predictions(
@@ -89,19 +87,13 @@ def _search_threshold(
             null_score_diff_threshold=current,
         )
         metrics = compute_stage1_metrics(predictions, references)
-        if best_metrics is None:
-            best_threshold = current
-            best_metrics = metrics
-        else:
-            current_key = (metrics["abstain_f1"], metrics["answerable_f1"])
-            best_key = (best_metrics["abstain_f1"], best_metrics["answerable_f1"])
-            if current_key > best_key:
-                best_threshold = current
-                best_metrics = metrics
+        sweep.append({"threshold": round(float(current), 10), **metrics})
         current += threshold_step
 
-    assert best_metrics is not None
-    return best_threshold, best_metrics
+    best_entry = max(sweep, key=lambda item: (item["abstain_f1"], item["answerable_f1"]))
+    best_threshold = float(best_entry["threshold"])
+    best_metrics = {key: value for key, value in best_entry.items() if key != "threshold"}
+    return best_threshold, best_metrics, sweep
 
 
 def main() -> None:
@@ -150,9 +142,10 @@ def main() -> None:
 
     threshold = 0.0
     validation_metrics: dict[str, float] | None = None
+    threshold_sweep: dict[str, list[dict[str, float]]] | None = None
     allow_abstain = args.mode == RUN_MODE_ABSTAIN
     if allow_abstain:
-        threshold, validation_metrics = _search_threshold(
+        threshold, validation_metrics, validation_sweep = _search_threshold(
             validation_examples,
             validation_features,
             validation_raw_predictions,
@@ -163,6 +156,21 @@ def main() -> None:
             threshold_max=args.threshold_max,
             threshold_step=args.threshold_step,
         )
+        _, _, dev_sweep = _search_threshold(
+            dev_examples,
+            dev_features,
+            dev_raw_predictions,
+            dev_references,
+            n_best_size=args.n_best_size,
+            max_answer_length=args.max_answer_length,
+            threshold_min=args.threshold_min,
+            threshold_max=args.threshold_max,
+            threshold_step=args.threshold_step,
+        )
+        threshold_sweep = {
+            "validation": validation_sweep,
+            "dev": dev_sweep,
+        }
 
     dev_predictions = postprocess_qa_predictions(
         dev_examples,
@@ -180,6 +188,7 @@ def main() -> None:
         "model_path": str(args.model_path),
         "selected_threshold": threshold,
         "validation_metrics": validation_metrics,
+        "threshold_sweep": threshold_sweep,
         "dev_metrics": dev_metrics,
         "dev_predictions": dev_predictions,
     }
