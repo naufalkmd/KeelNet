@@ -1,6 +1,6 @@
-Table~\ref{tab:stage1-main-results} is a placeholder for the main Stage 1
-comparison.
-It should be filled only after the team agrees on the stable runs to report.
+Table~\ref{tab:stage1-main-results} is the core Stage 1 comparison.
+It should report one stable baseline run and one stable abstain-aware run under
+matched training settings.
 
 \begin{table*}[t]
   \centering
@@ -23,6 +23,49 @@ It should be filled only after the team agrees on the stable runs to report.
 
 The baseline is trained only on answerable examples, while the abstain-aware
 variant includes explicit supervision for unanswerable cases.
+A Stage 1 win should be defined conservatively:
+unsupported-answer rate should decrease, answerable performance should remain
+usable, and abstain quality should improve without the model collapsing into
+trivial refusal behavior.
+
+Because the abstain-aware system uses a validation-selected threshold, the main
+table should be read together with a threshold sweep rather than as a single
+isolated operating point.
+
+\begin{figure}[t]
+  \centering
+  \fbox{\rule{0pt}{1.5in}\rule{0.95\linewidth}{0pt}}
+  \caption{Placeholder for the abstain-threshold sweep.
+  The final figure should plot answerable $F_1$, unsupported-answer rate, and
+  abstain $F_1$ against the null-score difference threshold, with the selected
+  threshold marked.}
+  \label{fig:stage1-threshold-sweep}
+\end{figure}
+
+\paragraph{Fill-in summary paragraph.}
+Once the stable runs are selected, this section can be finalized quickly with a
+summary of the following form:
+\begin{quote}
+Compared with the answer-only baseline, the abstain-aware model reduced
+unsupported-answer rate from \textit{[X]} to \textit{[Y]} while answerable
+\(F_1\) changed from \textit{[A]} to \textit{[B]}.
+Decision-aware overall \(F_1\) changed from \textit{[C]} to \textit{[D]}, and
+the validation-selected abstain threshold was \textit{[T]}.
+Taken together, these results suggest \textit{[one-sentence interpretation]}.
+\end{quote}
+
+\paragraph{Fill-in threshold interpretation.}
+The threshold-sweep discussion can also be written from a compact template:
+\begin{quote}
+Figure~\ref{fig:stage1-threshold-sweep} shows the expected trade-off as the
+abstain threshold changes.
+As the threshold moves toward \textit{[direction]}, unsupported-answer rate
+\textit{[decreases/increases]} while answerable \(F_1\)
+\textit{[decreases/increases]}.
+The selected threshold lies in a region where \textit{[brief justification]},
+which suggests the reported gain is \textit{[robust / sensitive]} rather than a
+single brittle operating point.
+\end{quote}
 
 The final version of this section should answer three questions:
 \begin{enumerate}[leftmargin=1.25em]
@@ -32,9 +75,10 @@ The final version of this section should answer three questions:
   machinery?
 \end{enumerate}
 
-Good additions for the final paper include:
+The final write-up should also include:
 \begin{itemize}[leftmargin=1.25em]
-  \item a threshold analysis plot,
-  \item a short qualitative comparison of failure cases, and
-  \item a compact summary of where the baseline still fails.
+  \item one short paragraph interpreting the threshold sweep,
+  \item a compact qualitative comparison of representative failure cases, and
+  \item a short note on whether the gain appears to come from better abstention
+  behavior rather than threshold gaming.
 \end{itemize}

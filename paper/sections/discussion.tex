@@ -13,9 +13,25 @@ that should be stated clearly.
   than a broad claim about hallucination in general.
 \end{itemize}
 
-\paragraph{Why this is still useful.}
-Even with those constraints, the setup is valuable because it tests one
-defensible claim with clean supervision and interpretable failure modes.
+\paragraph{How to interpret a positive result.}
+If Stage 1 shows that unsupported answers fall while answerable performance
+remains reasonably stable, then the main conclusion should be narrow but useful:
+explicit abstention supervision and abstention-aware evaluation can improve the
+answer-versus-abstain trade-off even in a simple extractive QA system.
+That would not explain hallucination in general, but it would support the idea
+that aligned targets and aligned metrics matter.
+
+\paragraph{How to interpret a mixed or negative result.}
+If unsupported answers decrease only when answerable performance collapses, or
+if gains appear only at brittle threshold settings, then Stage 1 should be read
+as evidence that abstention supervision alone is insufficient.
+That outcome would still be valuable because it would justify moving attention
+toward support verification, calibration, or stronger control mechanisms rather
+than over-claiming what a thresholded extractive model can do.
+
+\paragraph{Why this stage is still useful.}
+Even under its narrow scope, Stage 1 tests one defensible claim with clean
+supervision and interpretable failure modes.
 If Stage 1 cannot show a meaningful trade-off improvement, that is important
 negative evidence before investing in more complex later stages.
 

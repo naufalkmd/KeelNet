@@ -256,6 +256,16 @@ For Stage 1, you can use:
 
 - [`stages/01-grounded-abstention-baseline/results-template.md`](../stages/01-grounded-abstention-baseline/results-template.md)
 
+For Stages `02` to `06`, use:
+
+- [`stages/stage-note-template.md`](../stages/stage-note-template.md)
+
+Recommended note rhythm:
+
+1. fill in the goal, success condition, and planned commands before implementation
+2. update the note after smoke test with setup issues or command fixes
+3. update it again after any meaningful full run with metrics, verdict, and next actions
+
 ## 4. Troubleshooting
 
 If something fails, check:

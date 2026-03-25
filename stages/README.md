@@ -42,6 +42,12 @@ Current active stage files:
 
 Other stages now also include a `notebooks/google-colab.ipynb` template so teammates can start each stage from the same Colab workflow.
 
+Shared note template:
+
+- `stage-note-template.md`
+
+Use the shared template for lightweight stage planning and run notes in Stages `02` to `06`. Keep notes short and update them before implementation, after smoke test, and after any run worth sharing.
+
 ## Collaboration Branching
 
 Use Git branches for collaboration so each teammate can work in parallel without stepping on `main`.
