@@ -1,5 +1,18 @@
 # KeelNet Experiment Guidelines
 
+```mermaid
+flowchart TD
+    A[Make Hugging Face token] --> B[Open browser Colab from the correct GitHub branch]
+    B --> C[Add HF_TOKEN in Colab Secrets]
+    C --> D[Run setup, config, and test cells]
+    D --> E[Edit code in VS Code if needed]
+    E --> F[Commit and push to GitHub]
+    F --> G[Rerun setup cell in Colab]
+    G --> H{Stage successful?}
+    H -- No --> E
+    H -- Yes --> I[Run full experiment and save artifacts to Drive]
+```
+
 Use this guide to set up the official team workflow:
 
 1. open the notebook in browser Google Colab from the correct GitHub branch
