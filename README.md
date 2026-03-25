@@ -25,6 +25,11 @@ The broader roadmap lives in:
 - `docs/hallucination-project-proposal.md`
 - `docs/experiment-guidelines.md`
 
+## References
+
+- OpenAI, "Why language models hallucinate"
+  - https://openai.com/index/why-language-models-hallucinate/
+
 ## Repository Layout
 
 - `src/keelnet/`
