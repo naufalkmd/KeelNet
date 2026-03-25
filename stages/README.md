@@ -6,12 +6,11 @@ Keep each stage folder minimal.
 
 Default rule:
 
-- keep the stage `README.md`
-- add a notebook only when that stage becomes active
+- keep exactly one teammate-facing notebook template per stage at `notebooks/google-colab.ipynb`
 - add result files only when they are actually used
 - keep experiment artifacts in Google Drive, not inside the repo
 
-Avoid creating empty placeholder folders such as `notes/`, `outputs/`, or `notebooks/` for inactive stages.
+Avoid creating extra placeholder folders such as `notes/` or `outputs/` when they are not being used.
 
 Stages:
 
@@ -32,11 +31,16 @@ The current active implementation stage is:
 
 - `01-grounded-abstention-baseline`
 
+Only Stage `01` currently has a full supporting implementation under `src/keelnet`.
+
+Stages `02` to `06` already have teammate notebook templates, but the stage-specific Python code and commands for those stages still need to be defined during implementation.
+
 Current active stage files:
 
-- `README.md`
 - `results-template.md`
 - `notebooks/google-colab.ipynb`
+
+Other stages now also include a `notebooks/google-colab.ipynb` template so teammates can start each stage from the same Colab workflow.
 
 ## Collaboration Branching
 

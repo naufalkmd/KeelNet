@@ -15,15 +15,26 @@ Stage 1 tests one narrow claim:
 
 > A model trained to abstain on unsupported questions should produce fewer unsupported answers than an answer-only baseline, without sharply degrading answer quality on answerable questions.
 
-The detailed execution plan lives in:
+The detailed Stage 1 working notes now live in:
 
-- `stages/01-grounded-abstention-baseline/README.md`
+- `stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`
 
 The broader roadmap lives in:
 
 - `stages/README.md`
 - `docs/hallucination-project-proposal.md`
 - `docs/experiment-guidelines.md`
+
+## Paper Notes
+
+Keep these documents as background references for the later LaTeX paper and project writeup:
+
+- `docs/hallucination-project-proposal.md`
+  - project framing, scope, and research direction
+- `docs/hallucination-penalty.md`
+  - background note on why hallucination penalty alone is not enough
+- `stages/01-grounded-abstention-baseline/results-template.md`
+  - the current experiment record template for Stage 1
 
 ## References
 
@@ -86,4 +97,4 @@ The official team workflow for Stage 1 is:
 If you are onboarding a teammate, start with:
 
 - `docs/experiment-guidelines.md`
-- `stages/01-grounded-abstention-baseline/README.md`
+- `stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`

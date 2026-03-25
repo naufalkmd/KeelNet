@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "keelnet"
 version = "0.1.0"
 description = "KeelNet Stage 1 experiment scaffold for grounded abstention on SQuAD 2.0"
-readme = "stages/01-grounded-abstention-baseline/README.md"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
   "accelerate>=0.27",

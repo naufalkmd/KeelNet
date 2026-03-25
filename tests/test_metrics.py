@@ -1,4 +1,8 @@
+from pathlib import Path
+import sys
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from keelnet.metrics import compute_stage1_metrics, exact_match_score, f1_score, normalize_answer
 

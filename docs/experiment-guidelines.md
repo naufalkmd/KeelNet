@@ -1,16 +1,17 @@
 # KeelNet Experiment Guidelines
 
 ```mermaid
-flowchart TD
-    A[Make Hugging Face token] --> B[Open browser Colab from the correct GitHub branch]
-    B --> C[Add HF_TOKEN in Colab Secrets]
-    C --> D[Run setup, config, and test cells]
-    D --> E[Edit code in VS Code if needed]
-    E --> F[Commit and push to GitHub]
-    F --> G[Rerun setup cell in Colab]
-    G --> H{Stage successful?}
+%%{init: {"flowchart": {"nodeSpacing": 40, "rankSpacing": 55}, "themeVariables": {"fontSize": "20px"}}}%%
+flowchart LR
+    A[Make HF token] --> B[Open Colab<br/>from GitHub branch]
+    B --> C[Add HF_TOKEN<br/>in Secrets]
+    C --> D[Run setup,<br/>config, and test]
+    D --> E[Edit in VS Code]
+    E --> F[Commit and push]
+    F --> G[Rerun setup]
+    G --> H{Stage OK?}
     H -- No --> E
-    H -- Yes --> I[Run full experiment and save artifacts to Drive]
+    H -- Yes --> I[Run full experiment<br/>and save to Drive]
 ```
 
 Use this guide to set up the official team workflow:
@@ -31,10 +32,21 @@ Before the first notebook run, do the key and Hugging Face setup in this order:
 
 Also read:
 
-- [`stages/01-grounded-abstention-baseline/README.md`](../stages/01-grounded-abstention-baseline/README.md)
+- [`stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`](../stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb)
 - [`stages/01-grounded-abstention-baseline/results-template.md`](../stages/01-grounded-abstention-baseline/results-template.md)
 
-## 1. Install The Required Tools
+## 1. Prerequisites
+
+```mermaid
+flowchart LR
+    A[Install tools] --> B[Create accounts]
+    B --> C[Make HF token]
+    C --> D[Add HF_TOKEN in Colab Secrets]
+    D --> E[Set up Drive folder]
+    E --> F[Clone repo and branch locally]
+```
+
+### 1A. Install The Required Tools
 
 Install:
 
@@ -43,7 +55,7 @@ Install:
 - VS Code `Jupyter` extension
 - Git
 
-## 2. Create The Required Accounts
+### 1B. Create The Required Accounts
 
 Each teammate needs:
 
@@ -51,7 +63,7 @@ Each teammate needs:
 - Google account with Drive access
 - Hugging Face account
 
-## 3. Make A Hugging Face Token
+### 1C. Make A Hugging Face Token
 
 1. Sign in at `https://huggingface.co/`.
 2. Open Settings.
@@ -65,29 +77,9 @@ Each teammate needs:
 
 If Hugging Face shows the fine-grained token screen instead, keep it read-only and do not enable write or admin-style permissions.
 
-## 4. Open The Notebook In Colab
+### 1D. Put The Token In Google Colab
 
-Open it in browser Google Colab like this:
-
-1. open `https://colab.google.com/`
-2. click `GitHub`
-3. choose `naufalkmd/KeelNet`
-4. switch to the branch you want to run
-5. open `stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`
-6. make sure the runtime uses GPU
-7. do not run the setup cell yet if `HF_TOKEN` is not in Colab Secrets
-
-Important:
-
-- use browser Colab for executing this notebook
-- use VS Code for editing code between notebook runs
-- this notebook depends on `google.colab`, Drive mount, and Colab Secrets
-
-![1774434899953](image/experiment-guidelines/1774434899953.png)
-
-## 5. Put The Token In Google Colab
-
-1. Open the Stage 1 notebook in browser Google Colab.
+1. Open the stage notebook in browser Google Colab.
 2. Open the left sidebar in Colab.
 3. Click the key icon for `Secrets`.
 4. Add a new secret named `HF_TOKEN`.
@@ -102,7 +94,7 @@ What you should see after rerunning the setup cell:
 
 If you do not see the key icon, you are probably not in a real Colab runtime yet.
 
-## 6. Prepare Local Editing
+### 1E. Prepare Local Editing
 
 Clone the repo locally and switch to the correct branch:
 
@@ -113,7 +105,7 @@ git checkout stage/01-grounded-abstention-baseline
 git checkout -b yourname/stage1-work
 ```
 
-## 7. Set Up Drive
+### 1F. Set Up Drive
 
 Use this Drive path:
 
@@ -121,17 +113,20 @@ Use this Drive path:
 
 Share the `KeelNet` folder in your Google Drive with your teammates so they can see the saved artifacts.
 
-The notebook saves outputs under:
+Each stage notebook saves outputs under its own stage-specific folder:
 
-- `DRIVE_PROJECT_DIR / artifacts / stage1_colab / RUN_NAME`
+- `DRIVE_PROJECT_DIR / artifacts / stageN_colab / RUN_NAME`
 
-Use a unique `RUN_NAME` so teammates do not overwrite each other.
+Each notebook now builds `RUN_NAME` automatically from `AUTHOR_NAME` plus the stage and version number.
 
 Example:
 
-- `naufal-stage1-20260325-a`
+- `naufal-stage1-v1`
+- `naufal-stage1-v2`
 
-## 8. Understand The Three Places
+![1774439287595](image/experiment-guidelines/1774439287595.png)
+
+### 1G. Understand The Three Places
 
 Do not mix these up:
 
@@ -144,14 +139,90 @@ Important:
 - local file edits do not automatically update `/content/KeelNet`
 - Drive is for artifacts, not the repo
 
-## 9. Use This Repeat Loop
+Important:
+
+- Stage 1 is the only fully implemented code path in `src/keelnet` right now
+- Stages 2 to 6 already have teammate notebooks, but their Section 5 cells stay template-like until you define the stage-specific commands and modules
+
+## 2. Start Of A Stage
+
+```mermaid
+flowchart LR
+    A[Open Colab] --> B[Pick GitHub repo and branch]
+    B --> C[Open stage notebook]
+    C --> D[Run setup]
+    D --> E[Run config]
+    E --> F[Run validate or test]
+    F --> G[Optional smoke test]
+    G --> H[Run main stage cells]
+```
+
+Open the stage notebook in browser Google Colab like this:
+
+1. open `https://colab.google.com/`
+2. click `GitHub`
+3. choose `naufalkmd/KeelNet`
+4. switch to the branch you want to run
+5. open the stage notebook you want
+6. example: `stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`
+7. make sure the runtime uses GPU
+8. do not run the setup cell yet if `HF_TOKEN` is not in Colab Secrets
+
+<p align="center">
+  <img src="image/experiment-guidelines/1774437932291.png" alt="Colab GitHub picker" width="48%" />
+  <img src="image/experiment-guidelines/1774434899953.png" alt="Colab notebook open screen" width="48%" />
+</p>
+
+Important:
+
+- use browser Colab for executing this notebook
+- use VS Code for editing code between notebook runs
+- this notebook depends on `google.colab`, Drive mount, and Colab Secrets
+
+Run the notebook in this order:
+
+1. setup cell
+2. config cell
+3. validation or test cell
+4. optional smoke test
+5. main stage command cells
+6. artifact or notes cells
+
+For Stage 1 specifically, the main run order is:
+
+1. train `baseline`
+2. train `abstain`
+3. evaluate both
+4. compare the results
+
+Before a long run, confirm:
+
+1. `Repo dir` is `/content/KeelNet`
+2. `Artifacts root` points to your Drive folder
+3. `Run output dir` points to your unique run folder
+4. `CUDA available: True` for full runs
+
+## 3. Editing Loop
+
+```mermaid
+flowchart LR
+    A[Run current notebook cells] --> B{Need code changes?}
+    B -- Yes --> C[Edit in VS Code]
+    C --> D[Commit and push]
+    D --> E[Rerun setup in Colab]
+    E --> F[Rerun needed cells]
+    F --> G{Stage successful?}
+    G -- No --> B
+    G -- Yes --> H[Push branch and share run]
+    B -- No --> F
+```
 
 Use this same loop during the whole stage:
 
 1. open the notebook in browser Colab from the correct GitHub branch
 2. run the setup cell
 3. run the config cell
-4. run the test cell
+4. run the validation or test cell
 5. if something needs to change, edit the code locally in VS Code
 6. commit your changes locally
 7. push your branch to GitHub
@@ -161,57 +232,41 @@ Use this same loop during the whole stage:
 
 If you skip step 8, Colab may still run old code.
 
-## 10. Run The Notebook In This Order
-
-For Stage 1, run:
-
-1. setup cell
-2. config cell
-3. test cell
-4. train `baseline`
-5. train `abstain`
-6. evaluate both
-7. compare the results
-
-Before a full run, do a smoke test with smaller:
+Before a full Stage 1 run, do a smoke test with smaller:
 
 - `MAX_TRAIN_SAMPLES`
 - `MAX_EVAL_SAMPLES`
 
-## 11. Check These Values Before Training
+Main rule:
 
-After the config cell, confirm:
+1. push your branch whenever code changes
+2. keep artifacts in Drive for every meaningful run
+3. only write a short result note for runs worth sharing or comparing
 
-1. `Repo dir` is `/content/KeelNet`
-2. `Artifacts root` points to your Drive folder
-3. `Run output dir` points to your unique run folder
-4. `CUDA available: True` for full runs
-
-## 12. Save And Report Results
-
-For each completed run, record:
+If you want to leave a short result note, keep it minimal:
 
 1. branch name
-2. run name
-3. what changed
-4. main metrics
-5. where the artifacts were saved
+2. `RUN_NAME`
+3. main metrics
+4. Drive folder path
 
-For Stage 1, fill in:
+Each stage notebook now ends with a `Share This Run` cell that prints this summary, saves it into the Drive run folder, and marks the run complete so the next run becomes the next version automatically.
+
+For Stage 1, you can use:
 
 - [`stages/01-grounded-abstention-baseline/results-template.md`](../stages/01-grounded-abstention-baseline/results-template.md)
 
-## 13. Quick Troubleshooting
+## 4. Troubleshooting
 
 If something fails, check:
 
 1. did you push your latest code?
 2. did you rerun the setup cell after pushing?
 3. is `DRIVE_PROJECT_DIR` correct?
-4. is `RUN_NAME` unique?
+4. is `AUTHOR_NAME` correct, and does the generated `RUN_NAME` look right?
 5. is the runtime on GPU?
 6. is `HF_TOKEN` loaded?
 
-## 14. One-Line Summary
+## 5. One-Line Summary
 
 Open the notebook in browser Colab from the correct GitHub branch, run it there, edit code in VS Code, push changes, rerun the setup cell, and repeat.

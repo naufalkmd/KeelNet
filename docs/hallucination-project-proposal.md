@@ -26,7 +26,7 @@ Use this as the active project rule:
 
 The concrete execution plan for this stage is in:
 
-- `stages/01-grounded-abstention-baseline/README.md`
+- `stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`
 
 Explicitly out of scope for now:
 
