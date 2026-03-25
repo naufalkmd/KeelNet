@@ -177,7 +177,8 @@ Important:
 
 - use browser Colab for executing this notebook
 - use VS Code for editing code between notebook runs
-- this notebook depends on `google.colab`, Drive mount, and Colab Secrets
+- hosted Colab uses `google.colab`, Drive mount, and Colab Secrets
+- for Colab connected to a local runtime, use `docs/local-gpu-runtime.md`
 
 Run the notebook in this order:
 
@@ -198,7 +199,7 @@ For Stage 1 specifically, the main run order is:
 Before a long run, confirm:
 
 1. `Repo dir` is `/content/KeelNet`
-2. `Artifacts root` points to your Drive folder
+2. `Artifacts root` points to your Drive folder in hosted Colab or your local project folder in local runtime
 3. `Run output dir` points to your unique run folder
 4. `CUDA available: True` for full runs
 
@@ -226,11 +227,11 @@ Use this same loop during the whole stage:
 5. if something needs to change, edit the code locally in VS Code
 6. commit your changes locally
 7. push your branch to GitHub
-8. rerun the setup cell in Colab so `/content/KeelNet` updates
+8. if you are using hosted Colab, rerun the setup cell so `/content/KeelNet` updates; in local runtime, rerun setup after environment or dependency changes
 9. rerun the cells you need
 10. repeat until the stage succeeds
 
-If you skip step 8, Colab may still run old code.
+If you skip step 8 in hosted Colab, Colab may still run old code.
 
 Before a full Stage 1 run, do a smoke test with smaller:
 
@@ -240,7 +241,7 @@ Before a full Stage 1 run, do a smoke test with smaller:
 Main rule:
 
 1. push your branch whenever code changes
-2. keep artifacts in Drive for every meaningful run
+2. keep artifacts in Drive or your local project folder for every meaningful run
 3. only write a short result note for runs worth sharing or comparing
 
 If you want to leave a short result note, keep it minimal:
@@ -248,9 +249,9 @@ If you want to leave a short result note, keep it minimal:
 1. branch name
 2. `RUN_NAME`
 3. main metrics
-4. Drive folder path
+4. artifact folder path
 
-Each stage notebook now ends with a `Share This Run` cell that prints this summary, saves it into the Drive run folder, and marks the run complete so the next run becomes the next version automatically.
+Each stage notebook now ends with a `Share This Run` cell that prints this summary, saves it into the current run folder, and marks the run complete so the next run becomes the next version automatically.
 
 For Stage 1, you can use:
 

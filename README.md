@@ -58,6 +58,8 @@ Use these files as the main entry points into the project:
   - official Stage 1 execution notebook
 - `docs/experiment-guidelines.md`
   - teammate setup, Colab workflow, and experiment loop
+- `docs/local-gpu-runtime.md`
+  - WSL2 and Colab local-runtime setup for using your own GPU
 - `stages/README.md`
   - stage roadmap and implementation status
 - `docs/hallucination-project-proposal.md`

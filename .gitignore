@@ -2,9 +2,11 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
 
 .ipynb_checkpoints/
 .pytest_cache/
+.venv/
 stages/**/outputs/
 
 paper/*.aux
