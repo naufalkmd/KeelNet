@@ -13,6 +13,16 @@ that should be stated clearly.
   than a broad claim about hallucination in general.
 \end{itemize}
 
+\paragraph{Intended deployment scope.}
+The current approach is best interpreted as a method for high-trust,
+document-bounded QA, not as a general-purpose opinion or advice generator.
+Its most plausible deployment settings are ones in which the evidence source is
+explicit, the answer should remain short and verifiable, and abstaining is
+preferable to guessing.
+If the provided evidence is incomplete, outdated, or systematically biased, the
+method may still produce a well-grounded but incomplete answer, so groundedness
+should not be confused with neutrality or full real-world balance.
+
 \paragraph{How to interpret a positive result.}
 If Stage 1 shows that unsupported answers fall while answerable performance
 remains reasonably stable, then the main conclusion should be narrow but useful:

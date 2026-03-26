@@ -25,6 +25,14 @@ That hypothesis is narrow enough to evaluate cleanly, but still meaningful as a
 first step toward a broader program on grounded answering, support verification,
 and calibrated uncertainty.
 
+The intended application setting is also narrow.
+\system\ is most naturally suited to bounded, evidence-grounded QA scenarios in
+which answers should be tied to supplied documents and abstention is preferable
+to unsupported guessing, such as internal knowledge assistants, support systems
+over approved documentation, and policy or compliance QA.
+It is not intended as a general solution for open-domain truthfulness, balanced
+opinion generation, or fairness beyond the scope of the provided evidence.
+
 This framing is also consistent with recent work arguing that hallucination
 persists partly because modern evaluation pipelines reward guessing more than
 appropriate uncertainty \citep{kalai2025why}.
