@@ -960,6 +960,870 @@ def stage3_share_code() -> str:
     )
 
 
+def stage4_config_code() -> str:
+    return (
+        dedent(
+            """
+            from pathlib import Path
+            import json
+            import re
+            import subprocess
+            import sys
+
+            import torch
+
+            REPO_DIR = Path(REPO_DIR).resolve()
+            PROJECT_STORAGE_DIR = Path(PROJECT_STORAGE_DIR).resolve()
+            DRIVE_PROJECT_DIR = PROJECT_STORAGE_DIR
+
+            # Change only this for each teammate. The notebook builds the stage name and next version automatically.
+            AUTHOR_NAME = "naufal"
+            RUN_BASENAME = f"{AUTHOR_NAME}-stage4"
+            ARTIFACTS_ROOT = PROJECT_STORAGE_DIR / "artifacts" / "stage4_colab"
+            COMPLETION_MARKER_NAME = "RUN_COMPLETED.txt"
+
+            STAGE_TITLE = "Stage 4: Unsupported-Confidence Control"
+            STAGE_OBJECTIVE = "Use calibrated QA and support signals to reduce confident unsupported answers without collapsing usefulness."
+            TARGET_METRICS = [
+                "unsupported-answer rate",
+                "supported-answer rate",
+                "answer F1",
+                "abstain F1",
+                "answer rate",
+            ]
+            IMPLEMENTATION_HINTS = [
+                "input: Stage 3 calibrated QA and support confidence signals",
+                "output: a fixed constrained controller with explicit support and QA gates",
+                "beat the Stage 2 gated baseline under an unsupported-answer budget",
+            ]
+            SUGGESTED_MODULES = ["keelnet.control", "keelnet.calibration", "keelnet.metrics"]
+
+
+            def completed_versions(root: Path, run_basename: str) -> list[int]:
+                versions: list[int] = []
+                if not root.exists():
+                    return versions
+
+                pattern = re.compile(rf"^{re.escape(run_basename)}-v(\\d+)$")
+                for child in root.iterdir():
+                    if not child.is_dir():
+                        continue
+                    match = pattern.match(child.name)
+                    if match and (child / COMPLETION_MARKER_NAME).exists():
+                        versions.append(int(match.group(1)))
+                return sorted(versions)
+
+
+            RUN_VERSION = max(completed_versions(ARTIFACTS_ROOT, RUN_BASENAME), default=0) + 1
+            RUN_NAME = f"{RUN_BASENAME}-v{RUN_VERSION}"
+            OUTPUT_ROOT = ARTIFACTS_ROOT / RUN_NAME
+            OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+            RUN_MARKER_FILE = OUTPUT_ROOT / "RUN_STARTED.txt"
+            RUN_NOTES_FILE = OUTPUT_ROOT / "run-notes-template.md"
+            RUN_SUMMARY_FILE = OUTPUT_ROOT / "run-summary.json"
+            COMPLETION_MARKER_FILE = OUTPUT_ROOT / COMPLETION_MARKER_NAME
+
+            DEFAULT_STAGE3_CALIBRATION_EVAL = Path("/content/KeelNet-local/artifacts/stage3_colab/naufal-stage3-v1/calibration_eval.json")
+            CALIBRATION_EVAL_PATH = str(DEFAULT_STAGE3_CALIBRATION_EVAL) if DEFAULT_STAGE3_CALIBRATION_EVAL.exists() else None
+            EVAL_BATCH_SIZE = 16
+            MAX_EVAL_SAMPLES = None
+            MAX_UNSUPPORTED_ANSWER_RATE = 20.0
+            SUPPORT_THRESHOLD_MIN = 0.40
+            SUPPORT_THRESHOLD_MAX = 0.80
+            SUPPORT_THRESHOLD_STEP = 0.05
+            QA_THRESHOLD_MIN = 0.40
+            QA_THRESHOLD_MAX = 0.80
+            QA_THRESHOLD_STEP = 0.05
+            JOINT_THRESHOLD_MIN = 0.45
+            JOINT_THRESHOLD_MAX = 0.85
+            JOINT_THRESHOLD_STEP = 0.05
+            ALPHA_MIN = 0.50
+            ALPHA_MAX = 0.90
+            ALPHA_STEP = 0.10
+
+            RUN_SMOKE_TEST = False
+            SMOKE_TEST_EVAL_SAMPLES = 64
+
+            if CALIBRATION_EVAL_PATH is not None:
+                CALIBRATION_EVAL_PATH = Path(CALIBRATION_EVAL_PATH).expanduser().resolve()
+                if not CALIBRATION_EVAL_PATH.exists():
+                    raise FileNotFoundError(f"Calibration eval file not found: {CALIBRATION_EVAL_PATH}")
+
+            CONTROL_EVAL = OUTPUT_ROOT / "control_eval.json"
+
+
+            def maybe_add_arg(cmd: list[str], flag: str, value: object | None) -> None:
+                if value is None:
+                    return
+                cmd.extend([flag, str(value)])
+
+
+            def build_control_command(
+                output_path: Path,
+                *,
+                max_eval_samples: int | None,
+                support_threshold_step: float,
+                qa_threshold_step: float,
+                joint_threshold_step: float,
+                alpha_step: float,
+            ) -> list[str] | None:
+                if CALIBRATION_EVAL_PATH is None:
+                    return None
+
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "keelnet.control",
+                    "--calibration-path",
+                    str(CALIBRATION_EVAL_PATH),
+                    "--output-path",
+                    str(output_path),
+                    "--eval-batch-size",
+                    str(EVAL_BATCH_SIZE),
+                    "--max-unsupported-answer-rate",
+                    str(MAX_UNSUPPORTED_ANSWER_RATE),
+                    "--support-threshold-min",
+                    str(SUPPORT_THRESHOLD_MIN),
+                    "--support-threshold-max",
+                    str(SUPPORT_THRESHOLD_MAX),
+                    "--support-threshold-step",
+                    str(support_threshold_step),
+                    "--qa-threshold-min",
+                    str(QA_THRESHOLD_MIN),
+                    "--qa-threshold-max",
+                    str(QA_THRESHOLD_MAX),
+                    "--qa-threshold-step",
+                    str(qa_threshold_step),
+                    "--joint-threshold-min",
+                    str(JOINT_THRESHOLD_MIN),
+                    "--joint-threshold-max",
+                    str(JOINT_THRESHOLD_MAX),
+                    "--joint-threshold-step",
+                    str(joint_threshold_step),
+                    "--alpha-min",
+                    str(ALPHA_MIN),
+                    "--alpha-max",
+                    str(ALPHA_MAX),
+                    "--alpha-step",
+                    str(alpha_step),
+                ]
+                maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                return cmd
+
+
+            smoke_command = build_control_command(
+                OUTPUT_ROOT / "smoke-control-eval.json",
+                max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
+                support_threshold_step=0.10,
+                qa_threshold_step=0.10,
+                joint_threshold_step=0.10,
+                alpha_step=0.20,
+            )
+            stage_command = build_control_command(
+                CONTROL_EVAL,
+                max_eval_samples=MAX_EVAL_SAMPLES,
+                support_threshold_step=SUPPORT_THRESHOLD_STEP,
+                qa_threshold_step=QA_THRESHOLD_STEP,
+                joint_threshold_step=JOINT_THRESHOLD_STEP,
+                alpha_step=ALPHA_STEP,
+            )
+
+            SMOKE_TEST_COMMANDS = [smoke_command] if smoke_command is not None else []
+            STAGE_COMMANDS = [stage_command] if stage_command is not None else []
+
+            RUN_MARKER_FILE.write_text(
+                "\\n".join(
+                    [
+                        f"stage={STAGE_TITLE}",
+                        f"run_name={RUN_NAME}",
+                        f"run_version=v{RUN_VERSION}",
+                        f"runtime_mode={RUNTIME_MODE}",
+                        f"repo_dir={REPO_DIR}",
+                        f"project_storage_dir={PROJECT_STORAGE_DIR}",
+                        f"git_branch={CURRENT_BRANCH}",
+                        f"calibration_eval_path={CALIBRATION_EVAL_PATH}",
+                        "status=configured",
+                        "note=This file is created when the config cell runs.",
+                    ]
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+
+            print(f"Runtime mode: {RUNTIME_MODE}")
+            print(f"Repo dir: {REPO_DIR}")
+            print(f"{PROJECT_STORAGE_LABEL}: {PROJECT_STORAGE_DIR}")
+            print(f"Artifacts root: {ARTIFACTS_ROOT}")
+            print(f"Run basename: {RUN_BASENAME}")
+            print(f"Run version: v{RUN_VERSION}")
+            print(f"Run output dir: {OUTPUT_ROOT}")
+            print(f"Run marker file: {RUN_MARKER_FILE}")
+            print(f"Calibration eval path: {CALIBRATION_EVAL_PATH}")
+            print(f"Control eval file: {CONTROL_EVAL}")
+            print(f"Max unsupported-answer rate: {MAX_UNSUPPORTED_ANSWER_RATE}")
+            print(f"CUDA available: {torch.cuda.is_available()}")
+            if torch.cuda.is_available():
+                print(f"GPU: {torch.cuda.get_device_name(0)}")
+            print("Target metrics:", ", ".join(TARGET_METRICS))
+            print("Suggested modules:", ", ".join(SUGGESTED_MODULES))
+
+            if CALIBRATION_EVAL_PATH is None:
+                print("Set CALIBRATION_EVAL_PATH before running Stage 4.")
+
+
+            def run(cmd):
+                rendered = [str(part) for part in cmd]
+                print("$", " ".join(rendered))
+                with subprocess.Popen(
+                    rendered,
+                    cwd=REPO_DIR,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    bufsize=1,
+                ) as process:
+                    if process.stdout is not None:
+                        for line in process.stdout:
+                            print(line, end="", flush=True)
+                    return_code = process.wait()
+                if return_code != 0:
+                    raise subprocess.CalledProcessError(return_code, rendered)
+
+
+            def run_many(commands, *, label: str) -> bool:
+                if not commands:
+                    print(f"No commands configured for {label} yet.")
+                    return False
+
+                for index, cmd in enumerate(commands, start=1):
+                    print(f"\\n[{label} {index}/{len(commands)}]")
+                    run(cmd)
+                return True
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def stage4_implementation_code() -> str:
+    return (
+        dedent(
+            """
+            if CALIBRATION_EVAL_PATH is None:
+                print("Set CALIBRATION_EVAL_PATH in the config cell before running Stage 4.")
+            else:
+                run_many(STAGE_COMMANDS, label="stage command")
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def stage4_save_code() -> str:
+    return (
+        dedent(
+            """
+            if not RUN_NOTES_FILE.exists():
+                metric_lines = [f"- {metric}" for metric in TARGET_METRICS]
+                RUN_NOTES_FILE.write_text(
+                    "\\n".join(
+                        [
+                            f"# {STAGE_TITLE} Notes",
+                            "",
+                            "Update this note three times:",
+                            "1. before implementation: goal, success condition, and commands",
+                            "2. after smoke test: environment issues and command fixes",
+                            "3. after a meaningful run: metrics, verdict, and next actions",
+                            "",
+                            "## Run Info",
+                            f"- Branch: {CURRENT_BRANCH}",
+                            f"- `RUN_NAME`: {RUN_NAME}",
+                            f"- Output folder: {OUTPUT_ROOT}",
+                            f"- Runtime mode: {RUNTIME_MODE}",
+                            "",
+                            "## Goal",
+                            "- One-sentence objective:",
+                            "- Unsupported-answer budget:",
+                            "- Out of scope:",
+                            "",
+                            "## Commands",
+                            f"- Smoke test command(s): {SMOKE_TEST_COMMANDS}",
+                            f"- Main command(s): {STAGE_COMMANDS}",
+                            f"- Input artifacts or checkpoints: Stage 3 calibration eval at {CALIBRATION_EVAL_PATH}",
+                            f"- Output files to inspect: {CONTROL_EVAL}",
+                            "",
+                            "## Main Metrics",
+                            *metric_lines,
+                            "",
+                            "## What Changed",
+                            "- ",
+                            "",
+                            "## What Worked",
+                            "- ",
+                            "",
+                            "## What Failed Or Looks Risky",
+                            "- ",
+                            "",
+                            "## Error Cases To Review",
+                            "- ",
+                            "",
+                            "## Decision",
+                            "- Keep, revise, or stop:",
+                            "- Reason:",
+                            "",
+                            "## Next Actions",
+                            "1. ",
+                            "2. ",
+                            "3. ",
+                        ]
+                    )
+                    + "\\n",
+                    encoding="utf-8",
+                )
+
+            RUN_SUMMARY_FILE.write_text(
+                json.dumps(
+                    {
+                        "stage": STAGE_TITLE,
+                        "run_name": RUN_NAME,
+                        "runtime_mode": RUNTIME_MODE,
+                        "git_branch": CURRENT_BRANCH,
+                        "output_root": str(OUTPUT_ROOT),
+                        "calibration_eval_path": str(CALIBRATION_EVAL_PATH) if CALIBRATION_EVAL_PATH is not None else None,
+                        "control_eval": str(CONTROL_EVAL),
+                        "target_metrics": TARGET_METRICS,
+                        "suggested_modules": SUGGESTED_MODULES,
+                        "max_unsupported_answer_rate": MAX_UNSUPPORTED_ANSWER_RATE,
+                    },
+                    indent=2,
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+
+            print(f"Notes template: {RUN_NOTES_FILE}")
+            print(f"Run summary: {RUN_SUMMARY_FILE}")
+            print("Current files under OUTPUT_ROOT:")
+            for path in sorted(OUTPUT_ROOT.rglob("*")):
+                print(path)
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def stage4_share_code() -> str:
+    return (
+        dedent(
+            """
+            from datetime import datetime, timezone
+
+            metric_lines = [f"- {metric}: <fill in after review>" for metric in TARGET_METRICS]
+            if CONTROL_EVAL.exists():
+                control_results = json.loads(CONTROL_EVAL.read_text(encoding="utf-8"))
+                stage2_metrics = control_results["stage2_gated_dev_metrics"]
+                stage4_metrics = control_results["control_dev_metrics"]
+                stage2_mix = control_results["stage2_gated_dev_mix"]
+                stage4_mix = control_results["control_dev_mix"]
+                config = control_results["selected_config"]
+                metric_lines = [
+                    f"- Unsupported-answer rate (dev): {stage2_metrics['unsupported_answer_rate']:.2f} -> {stage4_metrics['unsupported_answer_rate']:.2f}",
+                    f"- Answerable F1 (dev): {stage2_metrics['answerable_f1']:.2f} -> {stage4_metrics['answerable_f1']:.2f}",
+                    f"- Overall F1 (dev): {stage2_metrics['overall_f1']:.2f} -> {stage4_metrics['overall_f1']:.2f}",
+                    f"- Abstain F1 (dev): {stage2_metrics['abstain_f1']:.2f} -> {stage4_metrics['abstain_f1']:.2f}",
+                    f"- Supported-answer rate (among answers, dev): {stage2_mix['supported_answer_rate']:.2f} -> {stage4_mix['supported_answer_rate']:.2f}",
+                    f"- Answer rate (dev): {stage2_mix['answer_rate']:.2f} -> {stage4_mix['answer_rate']:.2f}",
+                    f"- Selected support threshold: {config['support_threshold']:.2f}",
+                    f"- Selected QA threshold: {config['qa_threshold']:.2f}",
+                    f"- Selected joint threshold: {config['joint_threshold']:.2f}",
+                    f"- Selected alpha: {config['alpha']:.2f}",
+                    f"- Max unsupported-answer rate budget: {control_results['max_unsupported_answer_rate']:.2f}",
+                ]
+
+            share_lines = [
+                f"# {STAGE_TITLE} Share Note",
+                "",
+                f"- runtime mode: {RUNTIME_MODE}",
+                f"- branch name: {CURRENT_BRANCH}",
+                f"- RUN_NAME: {RUN_NAME}",
+                *metric_lines,
+                f"- Output folder path: {OUTPUT_ROOT}",
+            ]
+            share_note = "\\n".join(share_lines) + "\\n"
+            SHARE_NOTE_FILE = OUTPUT_ROOT / "collab-share-note.md"
+            SHARE_NOTE_FILE.write_text(share_note, encoding="utf-8")
+            COMPLETION_MARKER_FILE.write_text(
+                "\\n".join(
+                    [
+                        f"run_name={RUN_NAME}",
+                        f"completed_at={datetime.now(timezone.utc).isoformat()}",
+                        f"share_note={SHARE_NOTE_FILE.name}",
+                        "status=completed",
+                    ]
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+            print(share_note)
+            print(f"Saved share note: {SHARE_NOTE_FILE}")
+            print(f"Saved completion marker: {COMPLETION_MARKER_FILE}")
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def stage5_config_code() -> str:
+    return (
+        dedent(
+            """
+            from pathlib import Path
+            import json
+            import re
+            import subprocess
+            import sys
+
+            import torch
+
+            REPO_DIR = Path(REPO_DIR).resolve()
+            PROJECT_STORAGE_DIR = Path(PROJECT_STORAGE_DIR).resolve()
+            DRIVE_PROJECT_DIR = PROJECT_STORAGE_DIR
+
+            AUTHOR_NAME = "naufal"
+            RUN_BASENAME = f"{AUTHOR_NAME}-stage5"
+            ARTIFACTS_ROOT = PROJECT_STORAGE_DIR / "artifacts" / "stage5_colab"
+            COMPLETION_MARKER_NAME = "RUN_COMPLETED.txt"
+
+            STAGE_TITLE = "Stage 5: Support-Constrained Learning Comparison"
+            STAGE_OBJECTIVE = "Compare the best modular pipeline against a direct support-constrained learning objective under matched conditions."
+            TARGET_METRICS = [
+                "overall F1",
+                "answerable F1",
+                "unsupported-answer rate",
+                "supported-answer rate",
+                "abstain F1",
+            ]
+            IMPLEMENTATION_HINTS = [
+                "input: the same grounded QA split used in Stages 1 to 4",
+                "output: a jointly trained answer-support-abstain learner",
+                "compare directly against the strongest modular Stage 4 baseline when available",
+            ]
+            SUGGESTED_MODULES = ["keelnet.learn", "keelnet.metrics", "keelnet.train", "keelnet.evaluate"]
+
+
+            def completed_versions(root: Path, run_basename: str) -> list[int]:
+                versions: list[int] = []
+                if not root.exists():
+                    return versions
+
+                pattern = re.compile(rf"^{re.escape(run_basename)}-v(\\d+)$")
+                for child in root.iterdir():
+                    if not child.is_dir():
+                        continue
+                    match = pattern.match(child.name)
+                    if match and (child / COMPLETION_MARKER_NAME).exists():
+                        versions.append(int(match.group(1)))
+                return sorted(versions)
+
+
+            RUN_VERSION = max(completed_versions(ARTIFACTS_ROOT, RUN_BASENAME), default=0) + 1
+            RUN_NAME = f"{RUN_BASENAME}-v{RUN_VERSION}"
+            OUTPUT_ROOT = ARTIFACTS_ROOT / RUN_NAME
+            OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+            RUN_MARKER_FILE = OUTPUT_ROOT / "RUN_STARTED.txt"
+            RUN_NOTES_FILE = OUTPUT_ROOT / "run-notes-template.md"
+            RUN_SUMMARY_FILE = OUTPUT_ROOT / "run-summary.json"
+            COMPLETION_MARKER_FILE = OUTPUT_ROOT / COMPLETION_MARKER_NAME
+
+            DEFAULT_STAGE4_CONTROL_EVAL = Path("/content/KeelNet-local/artifacts/stage4_colab/naufal-stage4-v1/control_eval.json")
+            MODULAR_BASELINE_EVAL_PATH = str(DEFAULT_STAGE4_CONTROL_EVAL) if DEFAULT_STAGE4_CONTROL_EVAL.exists() else None
+
+            MODEL_NAME = "distilbert-base-uncased"
+            NUM_TRAIN_EPOCHS = 3.0
+            TRAIN_BATCH_SIZE = 8
+            EVAL_BATCH_SIZE = 8
+            LEARNING_RATE = 2e-5
+            WEIGHT_DECAY = 0.01
+            WARMUP_RATIO = 0.0
+            KEEP_LOSS_WEIGHT = 1.0
+            SUPPORT_LOSS_WEIGHT = 1.0
+            KEEP_POSITIVE_WEIGHT = 1.0
+            KEEP_NEGATIVE_WEIGHT = 2.0
+            MAX_TRAIN_SAMPLES = None
+            MAX_EVAL_SAMPLES = None
+            MAX_UNSUPPORTED_ANSWER_RATE = 20.0
+            KEEP_THRESHOLD_MIN = 0.05
+            KEEP_THRESHOLD_MAX = 0.95
+            KEEP_THRESHOLD_STEP = 0.05
+
+            RUN_SMOKE_TEST = False
+            SMOKE_TEST_TRAIN_SAMPLES = 256
+            SMOKE_TEST_EVAL_SAMPLES = 128
+            SMOKE_TEST_EPOCHS = 1.0
+
+            LEARNER_DIR = OUTPUT_ROOT / "learner"
+            LEARNER_EVAL = OUTPUT_ROOT / "learner_eval.json"
+
+            if MODULAR_BASELINE_EVAL_PATH is not None:
+                MODULAR_BASELINE_EVAL_PATH = Path(MODULAR_BASELINE_EVAL_PATH).expanduser().resolve()
+                if not MODULAR_BASELINE_EVAL_PATH.exists():
+                    raise FileNotFoundError(f"Baseline eval file not found: {MODULAR_BASELINE_EVAL_PATH}")
+
+
+            def maybe_add_arg(cmd: list[str], flag: str, value: object | None) -> None:
+                if value is None:
+                    return
+                cmd.extend([flag, str(value)])
+
+
+            def build_train_command(
+                output_dir: Path,
+                *,
+                max_train_samples: int | None,
+                max_eval_samples: int | None,
+                num_train_epochs: float,
+            ) -> list[str]:
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "keelnet.learn",
+                    "train",
+                    "--output-dir",
+                    str(output_dir),
+                    "--model-name",
+                    MODEL_NAME,
+                    "--num-train-epochs",
+                    str(num_train_epochs),
+                    "--train-batch-size",
+                    str(TRAIN_BATCH_SIZE),
+                    "--eval-batch-size",
+                    str(EVAL_BATCH_SIZE),
+                    "--learning-rate",
+                    str(LEARNING_RATE),
+                    "--weight-decay",
+                    str(WEIGHT_DECAY),
+                    "--warmup-ratio",
+                    str(WARMUP_RATIO),
+                    "--keep-loss-weight",
+                    str(KEEP_LOSS_WEIGHT),
+                    "--support-loss-weight",
+                    str(SUPPORT_LOSS_WEIGHT),
+                    "--keep-positive-weight",
+                    str(KEEP_POSITIVE_WEIGHT),
+                    "--keep-negative-weight",
+                    str(KEEP_NEGATIVE_WEIGHT),
+                ]
+                maybe_add_arg(cmd, "--max-train-samples", max_train_samples)
+                maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                return cmd
+
+
+            def build_eval_command(
+                model_path: Path,
+                output_path: Path,
+                *,
+                max_eval_samples: int | None,
+            ) -> list[str]:
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "keelnet.learn",
+                    "evaluate",
+                    "--model-path",
+                    str(model_path),
+                    "--output-path",
+                    str(output_path),
+                    "--eval-batch-size",
+                    str(EVAL_BATCH_SIZE),
+                    "--keep-threshold-min",
+                    str(KEEP_THRESHOLD_MIN),
+                    "--keep-threshold-max",
+                    str(KEEP_THRESHOLD_MAX),
+                    "--keep-threshold-step",
+                    str(KEEP_THRESHOLD_STEP),
+                    "--max-unsupported-answer-rate",
+                    str(MAX_UNSUPPORTED_ANSWER_RATE),
+                ]
+                maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                return cmd
+
+
+            smoke_model_dir = OUTPUT_ROOT / "smoke-learner"
+            smoke_eval_path = OUTPUT_ROOT / "smoke-learner-eval.json"
+            smoke_train_command = build_train_command(
+                smoke_model_dir,
+                max_train_samples=SMOKE_TEST_TRAIN_SAMPLES,
+                max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
+                num_train_epochs=SMOKE_TEST_EPOCHS,
+            )
+            smoke_eval_command = build_eval_command(
+                smoke_model_dir,
+                smoke_eval_path,
+                max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
+            )
+            stage_train_command = build_train_command(
+                LEARNER_DIR,
+                max_train_samples=MAX_TRAIN_SAMPLES,
+                max_eval_samples=MAX_EVAL_SAMPLES,
+                num_train_epochs=NUM_TRAIN_EPOCHS,
+            )
+            stage_eval_command = build_eval_command(
+                LEARNER_DIR,
+                LEARNER_EVAL,
+                max_eval_samples=MAX_EVAL_SAMPLES,
+            )
+
+            SMOKE_TEST_COMMANDS = [smoke_train_command, smoke_eval_command]
+            STAGE_COMMANDS = [stage_train_command, stage_eval_command]
+
+            RUN_MARKER_FILE.write_text(
+                "\\n".join(
+                    [
+                        f"stage={STAGE_TITLE}",
+                        f"run_name={RUN_NAME}",
+                        f"run_version=v{RUN_VERSION}",
+                        f"runtime_mode={RUNTIME_MODE}",
+                        f"repo_dir={REPO_DIR}",
+                        f"project_storage_dir={PROJECT_STORAGE_DIR}",
+                        f"git_branch={CURRENT_BRANCH}",
+                        f"baseline_eval_path={MODULAR_BASELINE_EVAL_PATH}",
+                        "status=configured",
+                        "note=This file is created when the config cell runs.",
+                    ]
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+
+            print(f"Runtime mode: {RUNTIME_MODE}")
+            print(f"Repo dir: {REPO_DIR}")
+            print(f"{PROJECT_STORAGE_LABEL}: {PROJECT_STORAGE_DIR}")
+            print(f"Artifacts root: {ARTIFACTS_ROOT}")
+            print(f"Run basename: {RUN_BASENAME}")
+            print(f"Run version: v{RUN_VERSION}")
+            print(f"Run output dir: {OUTPUT_ROOT}")
+            print(f"Run marker file: {RUN_MARKER_FILE}")
+            print(f"Baseline eval path: {MODULAR_BASELINE_EVAL_PATH}")
+            print(f"Learner dir: {LEARNER_DIR}")
+            print(f"Learner eval file: {LEARNER_EVAL}")
+            print(f"Model name: {MODEL_NAME}")
+            print(f"Max unsupported-answer rate: {MAX_UNSUPPORTED_ANSWER_RATE}")
+            print(f"CUDA available: {torch.cuda.is_available()}")
+            if torch.cuda.is_available():
+                print(f"GPU: {torch.cuda.get_device_name(0)}")
+            print("Target metrics:", ", ".join(TARGET_METRICS))
+            print("Suggested modules:", ", ".join(SUGGESTED_MODULES))
+
+
+            def run(cmd):
+                rendered = [str(part) for part in cmd]
+                print("$", " ".join(rendered))
+                with subprocess.Popen(
+                    rendered,
+                    cwd=REPO_DIR,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    bufsize=1,
+                ) as process:
+                    if process.stdout is not None:
+                        for line in process.stdout:
+                            print(line, end="", flush=True)
+                    return_code = process.wait()
+                if return_code != 0:
+                    raise subprocess.CalledProcessError(return_code, rendered)
+
+
+            def run_many(commands, *, label: str) -> bool:
+                if not commands:
+                    print(f"No commands configured for {label} yet.")
+                    return False
+
+                for index, cmd in enumerate(commands, start=1):
+                    print(f"\\n[{label} {index}/{len(commands)}]")
+                    run(cmd)
+                return True
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def stage5_implementation_code() -> str:
+    return (
+        dedent(
+            """
+            run_many(STAGE_COMMANDS, label="stage command")
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def stage5_save_code() -> str:
+    return (
+        dedent(
+            """
+            if not RUN_NOTES_FILE.exists():
+                metric_lines = [f"- {metric}" for metric in TARGET_METRICS]
+                RUN_NOTES_FILE.write_text(
+                    "\\n".join(
+                        [
+                            f"# {STAGE_TITLE} Notes",
+                            "",
+                            "Update this note three times:",
+                            "1. before implementation: goal, success condition, and commands",
+                            "2. after smoke test: environment issues and command fixes",
+                            "3. after a meaningful run: metrics, verdict, and next actions",
+                            "",
+                            "## Run Info",
+                            f"- Branch: {CURRENT_BRANCH}",
+                            f"- `RUN_NAME`: {RUN_NAME}",
+                            f"- Output folder: {OUTPUT_ROOT}",
+                            f"- Runtime mode: {RUNTIME_MODE}",
+                            "",
+                            "## Goal",
+                            f"- One-sentence objective: {STAGE_OBJECTIVE}",
+                            "- Success condition:",
+                            "- Out of scope:",
+                            "",
+                            "## Commands",
+                            f"- Smoke test command(s): {SMOKE_TEST_COMMANDS}",
+                            f"- Main command(s): {STAGE_COMMANDS}",
+                            f"- Modular baseline eval path: {MODULAR_BASELINE_EVAL_PATH}",
+                            f"- Output files to inspect: {LEARNER_EVAL}",
+                            "",
+                            "## Main Metrics",
+                            *metric_lines,
+                            "",
+                            "## What Changed",
+                            "- ",
+                            "",
+                            "## What Worked",
+                            "- ",
+                            "",
+                            "## What Failed Or Looks Risky",
+                            "- ",
+                            "",
+                            "## Error Cases To Review",
+                            "- ",
+                            "",
+                            "## Decision",
+                            "- Keep, revise, or stop:",
+                            "- Reason:",
+                            "",
+                            "## Next Actions",
+                            "1. ",
+                            "2. ",
+                            "3. ",
+                        ]
+                    )
+                    + "\\n",
+                    encoding="utf-8",
+                )
+
+            RUN_SUMMARY_FILE.write_text(
+                json.dumps(
+                    {
+                        "stage": STAGE_TITLE,
+                        "run_name": RUN_NAME,
+                        "runtime_mode": RUNTIME_MODE,
+                        "git_branch": CURRENT_BRANCH,
+                        "output_root": str(OUTPUT_ROOT),
+                        "learner_dir": str(LEARNER_DIR),
+                        "learner_eval": str(LEARNER_EVAL),
+                        "baseline_eval_path": str(MODULAR_BASELINE_EVAL_PATH) if MODULAR_BASELINE_EVAL_PATH is not None else None,
+                        "target_metrics": TARGET_METRICS,
+                        "suggested_modules": SUGGESTED_MODULES,
+                        "max_unsupported_answer_rate": MAX_UNSUPPORTED_ANSWER_RATE,
+                    },
+                    indent=2,
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+
+            print(f"Notes template: {RUN_NOTES_FILE}")
+            print(f"Run summary: {RUN_SUMMARY_FILE}")
+            print("Current files under OUTPUT_ROOT:")
+            for path in sorted(OUTPUT_ROOT.rglob("*")):
+                print(path)
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def stage5_share_code() -> str:
+    return (
+        dedent(
+            """
+            from datetime import datetime, timezone
+
+            metric_lines = [f"- {metric}: <fill in after review>" for metric in TARGET_METRICS]
+            if LEARNER_EVAL.exists():
+                learner_results = json.loads(LEARNER_EVAL.read_text(encoding="utf-8"))
+                dev_metrics = learner_results["dev_metrics"]
+                dev_mix = learner_results["dev_mix"]
+                metric_lines = [
+                    f"- Overall F1 (dev): {dev_metrics['overall_f1']:.2f}",
+                    f"- Answerable F1 (dev): {dev_metrics['answerable_f1']:.2f}",
+                    f"- Unsupported-answer rate (dev): {dev_metrics['unsupported_answer_rate']:.2f}",
+                    f"- Abstain F1 (dev): {dev_metrics['abstain_f1']:.2f}",
+                    f"- Supported-answer rate (among answers, dev): {dev_mix['supported_answer_rate']:.2f}",
+                    f"- Answer rate (dev): {dev_mix['answer_rate']:.2f}",
+                    f"- Selected keep threshold: {learner_results['selected_keep_threshold']:.2f}",
+                    f"- Max unsupported-answer rate budget: {learner_results['max_unsupported_answer_rate']:.2f}",
+                ]
+                if MODULAR_BASELINE_EVAL_PATH is not None and MODULAR_BASELINE_EVAL_PATH.exists():
+                    baseline_results = json.loads(MODULAR_BASELINE_EVAL_PATH.read_text(encoding="utf-8"))
+                    baseline_metrics = baseline_results.get("control_dev_metrics")
+                    baseline_mix = baseline_results.get("control_dev_mix")
+                    if baseline_metrics is not None and baseline_mix is not None:
+                        metric_lines = [
+                            f"- Overall F1 (dev): {baseline_metrics['overall_f1']:.2f} -> {dev_metrics['overall_f1']:.2f}",
+                            f"- Answerable F1 (dev): {baseline_metrics['answerable_f1']:.2f} -> {dev_metrics['answerable_f1']:.2f}",
+                            f"- Unsupported-answer rate (dev): {baseline_metrics['unsupported_answer_rate']:.2f} -> {dev_metrics['unsupported_answer_rate']:.2f}",
+                            f"- Abstain F1 (dev): {baseline_metrics['abstain_f1']:.2f} -> {dev_metrics['abstain_f1']:.2f}",
+                            f"- Supported-answer rate (among answers, dev): {baseline_mix['supported_answer_rate']:.2f} -> {dev_mix['supported_answer_rate']:.2f}",
+                            f"- Answer rate (dev): {baseline_mix['answer_rate']:.2f} -> {dev_mix['answer_rate']:.2f}",
+                            f"- Selected keep threshold: {learner_results['selected_keep_threshold']:.2f}",
+                            f"- Max unsupported-answer rate budget: {learner_results['max_unsupported_answer_rate']:.2f}",
+                        ]
+
+            share_lines = [
+                f"# {STAGE_TITLE} Share Note",
+                "",
+                f"- runtime mode: {RUNTIME_MODE}",
+                f"- branch name: {CURRENT_BRANCH}",
+                f"- RUN_NAME: {RUN_NAME}",
+                *metric_lines,
+                f"- Output folder path: {OUTPUT_ROOT}",
+            ]
+            share_note = "\\n".join(share_lines) + "\\n"
+            SHARE_NOTE_FILE = OUTPUT_ROOT / "collab-share-note.md"
+            SHARE_NOTE_FILE.write_text(share_note, encoding="utf-8")
+            COMPLETION_MARKER_FILE.write_text(
+                "\\n".join(
+                    [
+                        f"run_name={RUN_NAME}",
+                        f"completed_at={datetime.now(timezone.utc).isoformat()}",
+                        f"share_note={SHARE_NOTE_FILE.name}",
+                        "status=completed",
+                    ]
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+            print(share_note)
+            print(f"Saved share note: {SHARE_NOTE_FILE}")
+            print(f"Saved completion marker: {COMPLETION_MARKER_FILE}")
+            """
+        ).strip()
+        + "\n"
+    )
+
+
 STAGE_2 = {
     "path": REPO_ROOT / "stages/02-evidence-support-verification/notebooks/stage-02-evidence-support-verification-colab.ipynb",
     "stage_number": 2,
@@ -1234,7 +2098,7 @@ GENERIC_STAGES = [
                 - supported-answer rate and answer quality remain useful
                 - the behavior change comes from the intended control mechanism, not just over-abstention or another tiny delta
 
-                After that, record a few failure cases so you can tell whether Stage 6 needs adaptive balancing or Stage 5 really needs better evidence.
+                After that, record a few failure cases so Stage 5 can compare this controller against a direct support-constrained learner under matched conditions.
                 """
             ).strip()
             + "\n"
@@ -1251,21 +2115,64 @@ GENERIC_STAGES = [
             ).strip()
             + "\n"
         ),
+        "config_code": stage4_config_code(),
+        "implementation_code": stage4_implementation_code(),
+        "save_code": stage4_save_code(),
+        "share_code": stage4_share_code(),
     },
     {
-        "path": REPO_ROOT / "stages/05-retrieval-grounded-qa/notebooks/stage-05-retrieval-grounded-qa-colab.ipynb",
+        "path": REPO_ROOT / "stages/05-retrieval-grounded-qa/notebooks/stage-05-support-constrained-learning-colab.ipynb",
         "branch": "stage/05-retrieval-grounded-qa",
         "stage_number": 5,
-        "stage_label": "Stage 5: Retrieval-Grounded QA",
-        "objective": "Move from fixed evidence to retrieved evidence only after the controlled proof path is stable.",
-        "metrics": ["retrieval recall at k", "answer F1", "unsupported-answer rate after retrieval", "abstain quality"],
+        "stage_label": "Stage 5: Support-Constrained Learning Comparison",
+        "objective": "Compare the best modular pipeline against a direct support-constrained learning objective under matched conditions.",
+        "metrics": ["overall F1", "unsupported-answer rate", "supported-answer rate", "abstain F1", "comparison against modular baseline"],
         "hints": [
-            "input: question",
-            "intermediate step: retrieve top-k evidence",
-            "output: answer or ABSTAIN",
-            "treat retrieval as a realism test, not the proof of the core mechanism",
+            "input: the same grounded QA examples and metrics used in Stages 1 to 4",
+            "compare modular post-hoc control against a direct support-constrained objective",
+            "output: a matched baseline-vs-new-learning comparison, not another isolated module",
+            "treat retrieval as later realism work, not the proof step here",
         ],
-        "modules": ["keelnet.retrieve", "keelnet.evaluate", "keelnet.metrics"],
+        "modules": ["keelnet.learn", "keelnet.train", "keelnet.evaluate", "keelnet.metrics"],
+        "notes_markdown": (
+            dedent(
+                """
+                ## Stage Notes
+
+                ### Goal
+
+                Compare the strongest modular grounded-QA pipeline against a direct support-constrained learning objective under matched conditions.
+
+                ### Scope
+
+                - input: the same grounded QA examples used in Stages 1 to 4
+                - output: answer or `ABSTAIN`
+                - comparison: strongest modular baseline versus support-constrained learner
+
+                ### Main Change
+
+                - replace post-hoc-only control with a direct support-constrained learning objective
+
+                ### Main Metrics
+
+                - overall `F1`
+                - answerable `F1`
+                - unsupported-answer rate
+                - supported-answer rate
+                - abstain `F1`
+
+                ### What This Stage Validates
+
+                - changing the learning target adds value beyond modular tuning
+                - the gain is real under matched data, backbone, and evaluation conditions
+
+                ### Handoff Condition
+
+                Do not move to the next stage until the support-constrained learner either clearly beats the strongest modular baseline or gives a crisp failure diagnosis you can explain.
+                """
+            ).strip()
+            + "\n"
+        ),
         "config_markdown": (
             dedent(
                 """
@@ -1294,18 +2201,18 @@ GENERIC_STAGES = [
         ),
         "implementation_banner": implementation_banner(
             5,
-            "create <code>src/keelnet/retrieve.py</code> or an equivalent retrieval module, then extend <code>src/keelnet/data.py</code>, <code>src/keelnet/evaluate.py</code>, and <code>src/keelnet/metrics.py</code>.",
-            "retrieval failures and answering failures can be separated cleanly without hiding the earlier Stage 4 or Stage 6 behavior.",
-            "re-proving the core mechanism, adaptive balancing, open-ended generation claims.",
+            "review the auto-built <code>keelnet.learn</code> train and evaluate commands, then compare the resulting learner against the strongest modular Stage 4 baseline.",
+            "the new learning objective beats or clearly sharpens the best modular baseline under the same metrics and data split.",
+            "retrieval realism, adaptive balancing, open-ended generation claims.",
         ),
         "implementation_markdown": (
             dedent(
                 """
-                ## IMPLEMENTATION 1: Run The Stage 5 Retrieval Commands
+                ## IMPLEMENTATION 1: Run The Stage 5 Constrained-Learning Comparison
 
                 This is the main Stage 5 implementation and run section. Everything before this point is setup, sync, or validation.
 
-                Fill in `STAGE_COMMANDS` in the config cell with the actual commands for this stage. Start with one command, make sure the outputs land in `OUTPUT_ROOT`, then add the rest.
+                The config cell now builds the default Stage 5 train and evaluate commands automatically. Review those commands, adjust the hyperparameters if needed, and then run this section.
                 """
             ).strip()
             + "\n"
@@ -1315,7 +2222,7 @@ GENERIC_STAGES = [
                 """
                 <h2 style="color: #15803d;">Save Notes And Review Artifacts</h2>
 
-                This cell creates teammate-friendly note files inside the current run folder and lists the current artifacts. Update the generated notes as you learn what does and does not work in Stage 5: Retrieval-Grounded QA.
+                This cell creates teammate-friendly note files inside the current run folder and lists the current artifacts. Update the generated notes as you learn what does and does not work in Stage 5: Support-Constrained Learning Comparison.
                 """
             ).strip()
             + "\n"
@@ -1325,15 +2232,15 @@ GENERIC_STAGES = [
                 """
                 <h2 style="color: #15803d;">Final Check</h2>
 
-                Stage 5 is not successful just because retrieval runs.
+                Stage 5 is not successful just because a new objective trains.
 
                 Check all three:
 
-                - retrieval failures and answer-generation failures are separated clearly in evaluation
-                - end-to-end grounded behavior still preserves a meaningful share of the earlier controlled-stage gains
-                - the retrieval stack is stable enough for later balancing work, not just one lucky run
+                - the constrained-learning variant is compared against the strongest modular baseline under matched conditions
+                - unsupported answers go down without collapsing answer quality through trivial refusal
+                - the gain comes from the new objective itself, not just threshold changes hidden inside the comparison
 
-                After that, document whether the next bottleneck is retrieval recall, evidence ranking, or downstream answer control.
+                After that, document whether the next bottleneck is objective design, representation quality, or later adaptive balancing.
                 """
             ).strip()
             + "\n"
@@ -1350,18 +2257,22 @@ GENERIC_STAGES = [
             ).strip()
             + "\n"
         ),
+        "config_code": stage5_config_code(),
+        "implementation_code": stage5_implementation_code(),
+        "save_code": stage5_save_code(),
+        "share_code": stage5_share_code(),
     },
     {
         "path": REPO_ROOT / "stages/06-adaptive-constraint-balancing/notebooks/stage-06-adaptive-constraint-balancing-colab.ipynb",
         "branch": "stage/06-adaptive-constraint-balancing",
         "stage_number": 6,
         "stage_label": "Stage 6: Adaptive Constraint Balancing",
-        "objective": "Beat the best fixed Stage 4 controller by adapting the trade-off among answer quality, support, abstention, and confidence.",
-        "metrics": ["trade-off curve quality", "comparison against fixed-weight baselines", "robustness across operating points"],
+        "objective": "Only if needed, beat the strongest earlier fixed or constrained baseline by adapting the trade-off among answer quality, support, abstention, and confidence.",
+        "metrics": ["trade-off curve quality", "comparison against strongest earlier baselines", "robustness across operating points"],
         "hints": [
             "input: the calibrated and controlled signals from the earlier stages",
             "output: adaptive balancing or decision control",
-            "replace the best fixed controller, not a straw-man baseline",
+            "replace the strongest earlier baseline, not a straw-man baseline",
         ],
         "modules": ["keelnet.balance", "keelnet.evaluate", "keelnet.metrics"],
         "config_markdown": (
@@ -1392,8 +2303,8 @@ GENERIC_STAGES = [
         ),
         "implementation_banner": implementation_banner(
             6,
-            "create <code>src/keelnet/balance.py</code> or an equivalent adaptive-control module, then compare against the best fixed Stage 4 baseline in evaluation.",
-            "adaptive balancing beats the fixed-control baseline on the main trade-offs.",
+            "create <code>src/keelnet/balance.py</code> or an equivalent adaptive-control module, then compare against the strongest earlier Stage 4 or Stage 5 baseline in evaluation.",
+            "adaptive balancing beats the strongest earlier baseline on the main trade-offs.",
             "restarting earlier stages, open-ended generation claims, general hallucination claims.",
         ),
         "implementation_markdown": (
@@ -1427,7 +2338,7 @@ GENERIC_STAGES = [
 
                 Check all three:
 
-                - the adaptive method beats the best fixed-weight or fixed-threshold baseline you already trust
+                - the adaptive method beats the strongest fixed or constrained baseline you already trust
                 - the gain is not just threshold gaming or over-abstention
                 - the operating-point story is simple enough to explain to teammates and in the report
 
@@ -1479,6 +2390,8 @@ def sync_stage_2() -> None:
 def sync_generic_stage(stage: dict) -> None:
     notebook = load_notebook(stage["path"])
     notebook["cells"][0]["source"] = source_lines(intro_markdown(stage["stage_label"], stage["stage_number"]))
+    if "notes_markdown" in stage:
+        notebook["cells"][1]["source"] = source_lines(stage["notes_markdown"])
     notebook["cells"][2]["source"] = source_lines(SETUP_MARKDOWN)
     notebook["cells"][3]["source"] = source_lines(setup_code(stage["branch"]))
     notebook["cells"][4]["source"] = source_lines(stage["config_markdown"])

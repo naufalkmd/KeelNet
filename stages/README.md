@@ -25,16 +25,17 @@ Stages:
 Interpretation:
 
 - Stages `01` to `04` are the core proof path for the mechanism in a controlled setting.
-- Stage `05` checks whether the mechanism survives realistic retrieval noise.
-- Stage `06` checks whether the full pipeline beats simpler fixed balancing baselines.
+- Stage `05` now hosts the support-constrained learning comparison, even though the folder name still reflects the older retrieval plan.
+- Retrieval is now deferred as a later realism extension after the core proof path is stable.
+- Stage `06` is the optional adaptive extension after the strongest fixed or constrained baseline is already clear.
 
 Current execution priority:
 
 - `03-confidence-calibration`
-- `02-evidence-support-verification`
 - `04-unsupported-confidence-control`
-- `06-adaptive-constraint-balancing` after a strong fixed-control Stage 4 result
-- `05-retrieval-grounded-qa` after the controlled proof path is stable
+- `05-retrieval-grounded-qa` as the support-constrained learning comparison after a strong Stage 4 baseline
+- `06-adaptive-constraint-balancing` only if Stage 5 still leaves meaningful headroom
+- retrieval realism later, after the core Stage 4 versus Stage 5 comparison is stable
 
 Current implementation status:
 
@@ -58,6 +59,7 @@ Examples:
 - `notebooks/stage-01-grounded-abstention-baseline-colab.ipynb`
 - `notebooks/stage-02-evidence-support-verification-colab.ipynb`
 - `notebooks/stage-02-5-hard-negative-support-verification-colab.ipynb`
+- `notebooks/stage-05-support-constrained-learning-colab.ipynb`
 
 Use the stage-specific `stage-XX-...-colab.ipynb` files as the canonical
 notebook names for each stage.

@@ -9,7 +9,11 @@ from typing import Any
 
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 
-from keelnet.metrics import f1_score, metric_max_over_ground_truths, normalize_answer
+<<<<<<< HEAD
+from keelnet.metrics import f1_score, is_supported_answer, metric_max_over_ground_truths, normalize_answer
+=======
+from keelnet.metrics import f1_score, is_supported_answer, metric_max_over_ground_truths, normalize_answer
+>>>>>>> 371d661 (Implement Stage 5 support-constrained learner)
 
 _WORD_PATTERN = re.compile(r"\b\w+(?:[-']\w+)*\b")
 
@@ -136,6 +140,8 @@ def build_stage2_verification_splits(
     seed: int,
     negatives_per_answerable: int,
     negatives_per_unanswerable: int,
+    qa_predictions_by_split: Mapping[str, Mapping[str, Mapping[str, Any]]] | None = None,
+    support_match_f1_threshold: float = 0.5,
 ) -> DatasetDict:
     """Create Stage 2 verification examples from Stage 1 raw splits."""
 
@@ -175,20 +181,48 @@ def build_stage2_verification_splits(
                             "source_kind": "sampled-answerable-negative",
                         }
                     )
+            else:
+                for negative_index in range(negatives_per_unanswerable):
+                    records.append(
+                        {
+                            "id": f"{example_id}::unsupported::{negative_index}",
+                            "source_example_id": example_id,
+                            "question": question,
+                            "context": context,
+                            "candidate_answer": _sample_negative_answer(context, [], rng),
+                            "support_label": 0,
+                            "source_kind": "sampled-unanswerable-negative",
+                        }
+                    )
+
+            qa_predictions = None if qa_predictions_by_split is None else qa_predictions_by_split.get(split_name, {})
+            if qa_predictions is None:
                 continue
 
-            for negative_index in range(negatives_per_unanswerable):
-                records.append(
-                    {
-                        "id": f"{example_id}::unsupported::{negative_index}",
-                        "source_example_id": example_id,
-                        "question": question,
-                        "context": context,
-                        "candidate_answer": _sample_negative_answer(context, [], rng),
-                        "support_label": 0,
-                        "source_kind": "sampled-unanswerable-negative",
-                    }
-                )
+            prediction = qa_predictions.get(example_id, {"decision": "abstain", "answer": ""})
+            if str(prediction.get("decision", "abstain")).lower() != "answer":
+                continue
+
+            candidate_answer = str(prediction.get("answer", "")).strip()
+            if not normalize_answer(candidate_answer):
+                continue
+
+            qa_supported = answerable and is_supported_answer(
+                candidate_answer,
+                gold_answers,
+                match_f1_threshold=support_match_f1_threshold,
+            )
+            records.append(
+                {
+                    "id": f"{example_id}::qa-prediction",
+                    "source_example_id": example_id,
+                    "question": question,
+                    "context": context,
+                    "candidate_answer": candidate_answer,
+                    "support_label": 1 if qa_supported else 0,
+                    "source_kind": "qa-prediction-supported" if qa_supported else "qa-prediction-unsupported",
+                }
+            )
 
         verification_splits[split_name] = Dataset.from_list(records)
 
@@ -255,6 +289,87 @@ def prepare_train_features(examples, tokenizer, max_length: int, doc_stride: int
 
     tokenized_examples["start_positions"] = start_positions
     tokenized_examples["end_positions"] = end_positions
+    return tokenized_examples
+
+
+def prepare_stage5_train_features(examples, tokenizer, max_length: int, doc_stride: int):
+    """Tokenize Stage 5 train examples with span, keep, and support labels.
+
+    The keep/support labels are defined at the feature level. If an answerable
+    example overflows into a feature chunk that does not actually contain the
+    gold span, that feature receives keep/support label 0.
+    """
+
+    pad_on_right = tokenizer.padding_side == "right"
+    questions = [question.lstrip() for question in examples["question"]]
+    tokenized_examples = tokenizer(
+        questions if pad_on_right else examples["context"],
+        examples["context"] if pad_on_right else questions,
+        truncation="only_second" if pad_on_right else "only_first",
+        max_length=max_length,
+        stride=doc_stride,
+        return_overflowing_tokens=True,
+        return_offsets_mapping=True,
+        padding="max_length",
+    )
+
+    sample_mapping = tokenized_examples.pop("overflow_to_sample_mapping")
+    offset_mapping = tokenized_examples.pop("offset_mapping")
+    start_positions = []
+    end_positions = []
+    keep_labels = []
+    support_labels = []
+
+    for feature_index, offsets in enumerate(offset_mapping):
+        input_ids = tokenized_examples["input_ids"][feature_index]
+        cls_index = input_ids.index(tokenizer.cls_token_id)
+        sequence_ids = tokenized_examples.sequence_ids(feature_index)
+        sample_index = sample_mapping[feature_index]
+        answers = examples["answers"][sample_index]
+
+        if len(answers["answer_start"]) == 0:
+            start_positions.append(cls_index)
+            end_positions.append(cls_index)
+            keep_labels.append(0)
+            support_labels.append(0)
+            continue
+
+        start_char = answers["answer_start"][0]
+        end_char = start_char + len(answers["text"][0])
+        context_index = 1 if pad_on_right else 0
+
+        token_start_index = 0
+        while sequence_ids[token_start_index] != context_index:
+            token_start_index += 1
+
+        token_end_index = len(input_ids) - 1
+        while sequence_ids[token_end_index] != context_index:
+            token_end_index -= 1
+
+        answer_in_feature = not (
+            offsets[token_start_index][0] > start_char or offsets[token_end_index][1] < end_char
+        )
+        if not answer_in_feature:
+            start_positions.append(cls_index)
+            end_positions.append(cls_index)
+            keep_labels.append(0)
+            support_labels.append(0)
+            continue
+
+        while token_start_index < len(offsets) and offsets[token_start_index][0] <= start_char:
+            token_start_index += 1
+        start_positions.append(token_start_index - 1)
+
+        while offsets[token_end_index][1] >= end_char:
+            token_end_index -= 1
+        end_positions.append(token_end_index + 1)
+        keep_labels.append(1)
+        support_labels.append(1)
+
+    tokenized_examples["start_positions"] = start_positions
+    tokenized_examples["end_positions"] = end_positions
+    tokenized_examples["keep_labels"] = keep_labels
+    tokenized_examples["support_labels"] = support_labels
     return tokenized_examples
 
 
