@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from textwrap import dedent
+from textwrap import dedent, indent
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -12,6 +12,10 @@ def source_lines(text: str) -> list[str]:
     if not text.endswith("\n"):
         text += "\n"
     return text.splitlines(True)
+
+
+def indented_block(text: str, prefix: str = "            ") -> str:
+    return indent(text.rstrip(), prefix)
 
 
 def intro_markdown(stage_label: str, stage_number: int) -> str:
@@ -48,6 +52,11 @@ SETUP_MARKDOWN = (
         - hosted Colab defaults: repo `/content/KeelNet`, project folder `/content/drive/MyDrive/KeelNet`
         - local runtime defaults: repo `/content/KeelNet` if present, otherwise your current local checkout; project folder `/content/KeelNet-local`
         - optional overrides: `KEELNET_REPO_DIR`, `KEELNET_PROJECT_DIR`, and `KEELNET_DRIVE_SYNC_DIR`
+
+        Reliability reminder:
+
+        - hosted Colab defaults to a fresh clone on each setup run to avoid stale or conflicted repo state
+        - set `FORCE_FRESH_CLONE = False` in the setup cell or `KEELNET_FORCE_FRESH_CLONE=0` if you intentionally want to reuse `/content/KeelNet`
         """
     ).strip()
     + "\n"
@@ -78,6 +87,7 @@ STAGE_NOTE_TEMPLATE_MARKDOWN = (
         Use this structure for the generated run note:
 
         - Run info
+        - Executed notebook archive target
         - Goal
         - Commands
         - Main metrics
@@ -87,6 +97,85 @@ STAGE_NOTE_TEMPLATE_MARKDOWN = (
         - Error cases to review
         - Decision
         - Next actions
+        """
+    ).strip()
+    + "\n"
+)
+
+NOTEBOOK_ARCHIVE_CONFIG_CODE = (
+    dedent(
+        """
+        NOTEBOOK_ARCHIVE_DIR = OUTPUT_ROOT / "executed-notebook"
+        NOTEBOOK_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+        EXECUTED_NOTEBOOK_PATH = NOTEBOOK_ARCHIVE_DIR / f"{RUN_NAME}-executed.ipynb"
+        EXECUTED_NOTEBOOK_INSTRUCTIONS_FILE = NOTEBOOK_ARCHIVE_DIR / "README-save-executed-notebook.txt"
+        EXECUTED_NOTEBOOK_INSTRUCTIONS_FILE.write_text(
+            "\\n".join(
+                [
+                    "Keep the canonical stage notebook in the repo as a clean template.",
+                    "",
+                    "The save/share cells try to archive the live notebook automatically when Colab exposes it.",
+                    "",
+                    "If automatic capture is unavailable, preserve a meaningful run with outputs manually:",
+                    "1. in Colab, use File -> Download .ipynb or File -> Save a copy in Drive",
+                    f"2. save the exported file as: {EXECUTED_NOTEBOOK_PATH.name}",
+                    f"3. place that file inside: {NOTEBOOK_ARCHIVE_DIR}",
+                    "",
+                    "Anything saved in this run folder stays outside the template-sync path and will mirror to Drive when KEELNET_DRIVE_SYNC_DIR is enabled.",
+                ]
+            )
+            + "\\n",
+            encoding="utf-8",
+        )
+        AUTO_SAVED_EXECUTED_NOTEBOOK_PATH = None
+
+
+        def save_executed_notebook_snapshot() -> Path | None:
+            global AUTO_SAVED_EXECUTED_NOTEBOOK_PATH
+
+            try:
+                from google.colab import _message
+            except ImportError:
+                print(
+                    "Automatic executed-notebook capture is unavailable in this runtime. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
+                return None
+
+            try:
+                response = _message.blocking_request("get_ipynb", timeout_sec=30)
+            except TypeError:
+                response = _message.blocking_request("get_ipynb", request="", timeout_sec=30)
+            except Exception as exc:
+                print(
+                    "Automatic executed-notebook capture failed. "
+                    f"Save the notebook manually to {EXECUTED_NOTEBOOK_PATH}. Error: {exc}"
+                )
+                return None
+
+            notebook = response.get("ipynb") if isinstance(response, dict) else None
+            if notebook is None:
+                print(
+                    "Automatic executed-notebook capture did not return notebook content. "
+                    f"Save the notebook manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
+                return None
+
+            metadata = notebook.setdefault("metadata", {})
+            keelnet_metadata = metadata.setdefault("keelnet", {})
+            keelnet_metadata["run_name"] = RUN_NAME
+            keelnet_metadata["executed_notebook_target"] = str(EXECUTED_NOTEBOOK_PATH)
+            source_notebook_name = response.get("path") if isinstance(response, dict) else None
+            if source_notebook_name:
+                keelnet_metadata["source_notebook_name"] = source_notebook_name
+
+            EXECUTED_NOTEBOOK_PATH.write_text(
+                json.dumps(notebook, indent=1, ensure_ascii=False) + "\\n",
+                encoding="utf-8",
+            )
+            AUTO_SAVED_EXECUTED_NOTEBOOK_PATH = EXECUTED_NOTEBOOK_PATH
+            print(f"Saved executed notebook snapshot: {EXECUTED_NOTEBOOK_PATH}")
+            return EXECUTED_NOTEBOOK_PATH
         """
     ).strip()
     + "\n"
@@ -129,6 +218,11 @@ def setup_code(branch: str) -> str:
             HOSTED_COLAB_PROJECT_DIR = Path("/content/drive/MyDrive/KeelNet")
             DEFAULT_LOCAL_PROJECT_DIR = Path("/content/KeelNet-local")
             DEFAULT_LOCAL_REPO_DIR = Path("/content/KeelNet")
+            FORCE_FRESH_CLONE = True
+
+            env_force_fresh_clone = os.environ.get("KEELNET_FORCE_FRESH_CLONE")
+            if env_force_fresh_clone is not None:
+                FORCE_FRESH_CLONE = env_force_fresh_clone.strip().lower() not in {"0", "false", "no"}
 
 
             def detect_runtime_mode() -> str:
@@ -245,13 +339,17 @@ def setup_code(branch: str) -> str:
                     return resolve_local_repo_dir()
 
                 local_repo_dir = Path(os.environ.get("KEELNET_REPO_DIR", str(DEFAULT_LOCAL_REPO_DIR)))
+                if FORCE_FRESH_CLONE and local_repo_dir.exists():
+                    os.chdir("/content")
+                    print(f"Removing existing hosted Colab repo for a fresh clone: {{local_repo_dir}}")
+                    shutil.rmtree(local_repo_dir)
+
                 if (local_repo_dir / ".git").exists():
                     run_setup(["git", "fetch", "origin"], cwd=local_repo_dir)
+                    run_setup(["git", "checkout", GIT_BRANCH], cwd=local_repo_dir)
+                    run_setup(["git", "pull", "--ff-only", "origin", GIT_BRANCH], cwd=local_repo_dir)
                 else:
-                    run_setup(["git", "clone", GIT_REPO_URL, str(local_repo_dir)])
-
-                run_setup(["git", "checkout", GIT_BRANCH], cwd=local_repo_dir)
-                run_setup(["git", "pull", "--ff-only", "origin", GIT_BRANCH], cwd=local_repo_dir)
+                    run_setup(["git", "clone", "--branch", GIT_BRANCH, GIT_REPO_URL, str(local_repo_dir)])
                 return local_repo_dir.resolve()
 
 
@@ -262,6 +360,7 @@ def setup_code(branch: str) -> str:
             os.chdir(REPO_DIR)
             print(f"Runtime mode: {{RUNTIME_MODE}}")
             print(f"Runtime repo dir: {{REPO_DIR}}")
+            print(f"Force fresh clone: {{FORCE_FRESH_CLONE}}")
             CURRENT_BRANCH = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
                 check=True,
@@ -376,6 +475,8 @@ def generic_config_code(
             RUN_SUMMARY_FILE = OUTPUT_ROOT / "run-summary.json"
             COMPLETION_MARKER_FILE = OUTPUT_ROOT / COMPLETION_MARKER_NAME
 
+            __NOTEBOOK_ARCHIVE_CONFIG_CODE__
+
             RUN_MARKER_FILE.write_text(
                 "\\n".join(
                     [
@@ -402,6 +503,7 @@ def generic_config_code(
             print(f"Run basename: {{RUN_BASENAME}}")
             print(f"Run version: v{{RUN_VERSION}}")
             print(f"Run output dir: {{OUTPUT_ROOT}}")
+            print(f"Executed notebook target: {{EXECUTED_NOTEBOOK_PATH}}")
             print(f"Run marker file: {{RUN_MARKER_FILE}}")
             print(f"CUDA available: {{torch.cuda.is_available()}}")
             if torch.cuda.is_available():
@@ -439,7 +541,7 @@ def generic_config_code(
                     run(cmd)
                 return True
             """
-    ).strip()
+    ).replace("__NOTEBOOK_ARCHIVE_CONFIG_CODE__", NOTEBOOK_ARCHIVE_CONFIG_CODE.rstrip()).strip()
         + "\n"
     )
 
@@ -461,6 +563,7 @@ def generic_save_code() -> str:
     return (
         dedent(
             """
+            captured_notebook_path = save_executed_notebook_snapshot()
             mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
 
             if not RUN_NOTES_FILE.exists():
@@ -479,6 +582,7 @@ def generic_save_code() -> str:
                             f"- Branch: {CURRENT_BRANCH}",
                             f"- `RUN_NAME`: {RUN_NAME}",
                             f"- Output folder: {OUTPUT_ROOT}",
+                            f"- Executed notebook archive target: {EXECUTED_NOTEBOOK_PATH}",
                             f"- Runtime mode: {RUNTIME_MODE}",
                             "",
                             "## Goal",
@@ -532,6 +636,10 @@ def generic_save_code() -> str:
                         "drive_project_dir": str(DRIVE_PROJECT_DIR) if DRIVE_PROJECT_DIR is not None else None,
                         "output_root": str(OUTPUT_ROOT),
                         "mirrored_output_root": str(mirrored_output_root) if mirrored_output_root is not None else None,
+                        "executed_notebook_dir": str(NOTEBOOK_ARCHIVE_DIR),
+                        "executed_notebook_target": str(EXECUTED_NOTEBOOK_PATH),
+                        "executed_notebook_saved": captured_notebook_path is not None,
+                        "executed_notebook_instructions_file": str(EXECUTED_NOTEBOOK_INSTRUCTIONS_FILE),
                         "target_metrics": TARGET_METRICS,
                         "suggested_modules": SUGGESTED_MODULES,
                     },
@@ -543,6 +651,12 @@ def generic_save_code() -> str:
 
             print(f"Notes template: {RUN_NOTES_FILE}")
             print(f"Run summary: {RUN_SUMMARY_FILE}")
+            print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
+            if captured_notebook_path is None:
+                print(
+                    "Automatic notebook capture was unavailable. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
             if mirrored_output_root is not None:
                 print(f"Drive mirror: {mirrored_output_root}")
             print("Current files under OUTPUT_ROOT:")
@@ -560,6 +674,7 @@ def generic_share_code() -> str:
             """
             from datetime import datetime, timezone
 
+            captured_notebook_path = save_executed_notebook_snapshot()
             mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
             share_lines = [
                 f"# {STAGE_TITLE} Share Note",
@@ -569,6 +684,7 @@ def generic_share_code() -> str:
                 f"- RUN_NAME: {RUN_NAME}",
                 *[f"- {metric}: <fill in after review>" for metric in TARGET_METRICS],
                 f"- Output folder path: {OUTPUT_ROOT}",
+                f"- Executed notebook archive target: {EXECUTED_NOTEBOOK_PATH}",
             ]
             if mirrored_output_root is not None:
                 share_lines.append(f"- Drive mirror path: {mirrored_output_root}")
@@ -588,6 +704,11 @@ def generic_share_code() -> str:
                 encoding="utf-8",
             )
             print(share_note)
+            if captured_notebook_path is None:
+                print(
+                    "Automatic notebook capture was unavailable. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
             print(f"Update the metric lines in: {SHARE_NOTE_FILE}")
             print(f"Saved completion marker: {COMPLETION_MARKER_FILE}")
             if mirrored_output_root is not None:
@@ -657,6 +778,42 @@ def stage3_config_code() -> str:
                 return sorted(versions)
 
 
+            def completed_run_dirs(root: Path, *, run_prefix: str | None = None) -> list[Path]:
+                if not root.exists():
+                    return []
+
+                pattern = re.compile(rf"^{re.escape(run_prefix)}-v(\\d+)$") if run_prefix is not None else None
+                runs: list[Path] = []
+                for child in root.iterdir():
+                    if not child.is_dir():
+                        continue
+                    if not (child / COMPLETION_MARKER_NAME).exists():
+                        continue
+                    if pattern is not None and not pattern.match(child.name):
+                        continue
+                    runs.append(child)
+                return sorted(runs, key=lambda path: (path.stat().st_mtime, path.name))
+
+
+            def default_upstream_path(stage_folder: str, relative_path: str, *, preferred_run_prefix: str | None = None) -> str | None:
+                stage_root = PROJECT_STORAGE_DIR / "artifacts" / stage_folder
+                ordered_runs: list[Path] = []
+
+                if preferred_run_prefix is not None:
+                    ordered_runs.extend(reversed(completed_run_dirs(stage_root, run_prefix=preferred_run_prefix)))
+
+                for run_dir in reversed(completed_run_dirs(stage_root)):
+                    if run_dir not in ordered_runs:
+                        ordered_runs.append(run_dir)
+
+                relative = Path(relative_path)
+                for run_dir in ordered_runs:
+                    candidate = run_dir / relative
+                    if candidate.exists():
+                        return str(candidate)
+                return None
+
+
             RUN_VERSION = max(completed_versions(ARTIFACTS_ROOT, RUN_BASENAME), default=0) + 1
             RUN_NAME = f"{RUN_BASENAME}-v{RUN_VERSION}"
             OUTPUT_ROOT = ARTIFACTS_ROOT / RUN_NAME
@@ -666,11 +823,21 @@ def stage3_config_code() -> str:
             RUN_SUMMARY_FILE = OUTPUT_ROOT / "run-summary.json"
             COMPLETION_MARKER_FILE = OUTPUT_ROOT / COMPLETION_MARKER_NAME
 
-            DEFAULT_STAGE1_ABSTAIN_DIR = Path("/content/KeelNet-local/artifacts/stage1_colab/codex-stage1-live-20260326-014652/abstain")
-            DEFAULT_STAGE2_VERIFIER_DIR = Path("/content/KeelNet-local/artifacts/stage2_colab/naufal-stage2-v2/verifier")
-            BASE_QA_MODEL_DIR = str(DEFAULT_STAGE1_ABSTAIN_DIR) if DEFAULT_STAGE1_ABSTAIN_DIR.exists() else None
+            __NOTEBOOK_ARCHIVE_CONFIG_CODE__
+
+            DEFAULT_STAGE1_ABSTAIN_DIR = default_upstream_path(
+                "stage1_colab",
+                "abstain",
+                preferred_run_prefix=f"{AUTHOR_NAME}-stage1",
+            )
+            DEFAULT_STAGE2_VERIFIER_DIR = default_upstream_path(
+                "stage2_colab",
+                "verifier",
+                preferred_run_prefix=f"{AUTHOR_NAME}-stage2",
+            )
+            BASE_QA_MODEL_DIR = DEFAULT_STAGE1_ABSTAIN_DIR
             BASE_QA_MODE = "abstain"
-            VERIFIER_MODEL_DIR = str(DEFAULT_STAGE2_VERIFIER_DIR) if DEFAULT_STAGE2_VERIFIER_DIR.exists() else None
+            VERIFIER_MODEL_DIR = DEFAULT_STAGE2_VERIFIER_DIR
             EVAL_BATCH_SIZE = 16
             MAX_EVAL_SAMPLES = None
             CALIBRATION_BINS = 10
@@ -784,6 +951,7 @@ def stage3_config_code() -> str:
             print(f"Run basename: {RUN_BASENAME}")
             print(f"Run version: v{RUN_VERSION}")
             print(f"Run output dir: {OUTPUT_ROOT}")
+            print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
             print(f"Run marker file: {RUN_MARKER_FILE}")
             print(f"Base QA model dir: {BASE_QA_MODEL_DIR}")
             print(f"Base QA mode: {BASE_QA_MODE}")
@@ -828,7 +996,7 @@ def stage3_config_code() -> str:
                     run(cmd)
                 return True
             """
-        ).strip()
+        ).replace("__NOTEBOOK_ARCHIVE_CONFIG_CODE__", NOTEBOOK_ARCHIVE_CONFIG_CODE.rstrip()).strip()
         + "\n"
     )
 
@@ -851,6 +1019,7 @@ def stage3_save_code() -> str:
     return (
         dedent(
             """
+            captured_notebook_path = save_executed_notebook_snapshot()
             mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
 
             if not RUN_NOTES_FILE.exists():
@@ -869,6 +1038,7 @@ def stage3_save_code() -> str:
                             f"- Branch: {CURRENT_BRANCH}",
                             f"- `RUN_NAME`: {RUN_NAME}",
                             f"- Output folder: {OUTPUT_ROOT}",
+                            f"- Executed notebook archive target: {EXECUTED_NOTEBOOK_PATH}",
                             f"- Runtime mode: {RUNTIME_MODE}",
                             "",
                             "## Goal",
@@ -921,6 +1091,10 @@ def stage3_save_code() -> str:
                         "output_root": str(OUTPUT_ROOT),
                         "drive_project_dir": str(DRIVE_PROJECT_DIR) if DRIVE_PROJECT_DIR is not None else None,
                         "mirrored_output_root": str(mirrored_output_root) if mirrored_output_root is not None else None,
+                        "executed_notebook_dir": str(NOTEBOOK_ARCHIVE_DIR),
+                        "executed_notebook_target": str(EXECUTED_NOTEBOOK_PATH),
+                        "executed_notebook_saved": captured_notebook_path is not None,
+                        "executed_notebook_instructions_file": str(EXECUTED_NOTEBOOK_INSTRUCTIONS_FILE),
                         "base_qa_model_dir": str(BASE_QA_MODEL_DIR) if BASE_QA_MODEL_DIR is not None else None,
                         "base_qa_mode": BASE_QA_MODE,
                         "verifier_model_dir": str(VERIFIER_MODEL_DIR) if VERIFIER_MODEL_DIR is not None else None,
@@ -936,6 +1110,12 @@ def stage3_save_code() -> str:
 
             print(f"Notes template: {RUN_NOTES_FILE}")
             print(f"Run summary: {RUN_SUMMARY_FILE}")
+            print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
+            if captured_notebook_path is None:
+                print(
+                    "Automatic notebook capture was unavailable. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
             if mirrored_output_root is not None:
                 print(f"Drive mirror: {mirrored_output_root}")
             print("Current files under OUTPUT_ROOT:")
@@ -954,6 +1134,7 @@ def stage3_share_code() -> str:
             from pathlib import Path
             from datetime import datetime, timezone
 
+            captured_notebook_path = save_executed_notebook_snapshot()
             mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
             metric_lines = [f"- {metric}: <fill in after review>" for metric in TARGET_METRICS]
             plot_paths = {}
@@ -991,6 +1172,7 @@ def stage3_share_code() -> str:
                 f"- RUN_NAME: {RUN_NAME}",
                 *metric_lines,
                 f"- Output folder path: {OUTPUT_ROOT}",
+                f"- Executed notebook archive target: {EXECUTED_NOTEBOOK_PATH}",
             ]
             if mirrored_output_root is not None:
                 share_lines.append(f"- Drive mirror path: {mirrored_output_root}")
@@ -1010,6 +1192,11 @@ def stage3_share_code() -> str:
                 encoding="utf-8",
             )
             print(share_note)
+            if captured_notebook_path is None:
+                print(
+                    "Automatic notebook capture was unavailable. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
             print(f"Saved share note: {SHARE_NOTE_FILE}")
             print(f"Saved completion marker: {COMPLETION_MARKER_FILE}")
             if mirrored_output_root is not None:
@@ -1086,6 +1273,42 @@ def stage4_config_code() -> str:
                 return sorted(versions)
 
 
+            def completed_run_dirs(root: Path, *, run_prefix: str | None = None) -> list[Path]:
+                if not root.exists():
+                    return []
+
+                pattern = re.compile(rf"^{re.escape(run_prefix)}-v(\\d+)$") if run_prefix is not None else None
+                runs: list[Path] = []
+                for child in root.iterdir():
+                    if not child.is_dir():
+                        continue
+                    if not (child / COMPLETION_MARKER_NAME).exists():
+                        continue
+                    if pattern is not None and not pattern.match(child.name):
+                        continue
+                    runs.append(child)
+                return sorted(runs, key=lambda path: (path.stat().st_mtime, path.name))
+
+
+            def default_upstream_path(stage_folder: str, relative_path: str, *, preferred_run_prefix: str | None = None) -> str | None:
+                stage_root = PROJECT_STORAGE_DIR / "artifacts" / stage_folder
+                ordered_runs: list[Path] = []
+
+                if preferred_run_prefix is not None:
+                    ordered_runs.extend(reversed(completed_run_dirs(stage_root, run_prefix=preferred_run_prefix)))
+
+                for run_dir in reversed(completed_run_dirs(stage_root)):
+                    if run_dir not in ordered_runs:
+                        ordered_runs.append(run_dir)
+
+                relative = Path(relative_path)
+                for run_dir in ordered_runs:
+                    candidate = run_dir / relative
+                    if candidate.exists():
+                        return str(candidate)
+                return None
+
+
             RUN_VERSION = max(completed_versions(ARTIFACTS_ROOT, RUN_BASENAME), default=0) + 1
             RUN_NAME = f"{RUN_BASENAME}-v{RUN_VERSION}"
             OUTPUT_ROOT = ARTIFACTS_ROOT / RUN_NAME
@@ -1095,8 +1318,14 @@ def stage4_config_code() -> str:
             RUN_SUMMARY_FILE = OUTPUT_ROOT / "run-summary.json"
             COMPLETION_MARKER_FILE = OUTPUT_ROOT / COMPLETION_MARKER_NAME
 
-            DEFAULT_STAGE3_CALIBRATION_EVAL = Path("/content/KeelNet-local/artifacts/stage3_colab/naufal-stage3-v1/calibration_eval.json")
-            CALIBRATION_EVAL_PATH = str(DEFAULT_STAGE3_CALIBRATION_EVAL) if DEFAULT_STAGE3_CALIBRATION_EVAL.exists() else None
+            __NOTEBOOK_ARCHIVE_CONFIG_CODE__
+
+            DEFAULT_STAGE3_CALIBRATION_EVAL = default_upstream_path(
+                "stage3_colab",
+                "calibration_eval.json",
+                preferred_run_prefix=f"{AUTHOR_NAME}-stage3",
+            )
+            CALIBRATION_EVAL_PATH = DEFAULT_STAGE3_CALIBRATION_EVAL
             EVAL_BATCH_SIZE = 16
             MAX_EVAL_SAMPLES = None
             MAX_UNSUPPORTED_ANSWER_RATE = 20.0
@@ -1230,6 +1459,7 @@ def stage4_config_code() -> str:
             print(f"Run basename: {RUN_BASENAME}")
             print(f"Run version: v{RUN_VERSION}")
             print(f"Run output dir: {OUTPUT_ROOT}")
+            print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
             print(f"Run marker file: {RUN_MARKER_FILE}")
             print(f"Calibration eval path: {CALIBRATION_EVAL_PATH}")
             print(f"Control eval file: {CONTROL_EVAL}")
@@ -1273,7 +1503,7 @@ def stage4_config_code() -> str:
                     run(cmd)
                 return True
             """
-        ).strip()
+        ).replace("__NOTEBOOK_ARCHIVE_CONFIG_CODE__", NOTEBOOK_ARCHIVE_CONFIG_CODE.rstrip()).strip()
         + "\n"
     )
 
@@ -1296,6 +1526,7 @@ def stage4_save_code() -> str:
     return (
         dedent(
             """
+            captured_notebook_path = save_executed_notebook_snapshot()
             mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
 
             if not RUN_NOTES_FILE.exists():
@@ -1314,6 +1545,7 @@ def stage4_save_code() -> str:
                             f"- Branch: {CURRENT_BRANCH}",
                             f"- `RUN_NAME`: {RUN_NAME}",
                             f"- Output folder: {OUTPUT_ROOT}",
+                            f"- Executed notebook archive target: {EXECUTED_NOTEBOOK_PATH}",
                             f"- Runtime mode: {RUNTIME_MODE}",
                             "",
                             "## Goal",
@@ -1366,6 +1598,10 @@ def stage4_save_code() -> str:
                         "output_root": str(OUTPUT_ROOT),
                         "drive_project_dir": str(DRIVE_PROJECT_DIR) if DRIVE_PROJECT_DIR is not None else None,
                         "mirrored_output_root": str(mirrored_output_root) if mirrored_output_root is not None else None,
+                        "executed_notebook_dir": str(NOTEBOOK_ARCHIVE_DIR),
+                        "executed_notebook_target": str(EXECUTED_NOTEBOOK_PATH),
+                        "executed_notebook_saved": captured_notebook_path is not None,
+                        "executed_notebook_instructions_file": str(EXECUTED_NOTEBOOK_INSTRUCTIONS_FILE),
                         "calibration_eval_path": str(CALIBRATION_EVAL_PATH) if CALIBRATION_EVAL_PATH is not None else None,
                         "control_eval": str(CONTROL_EVAL),
                         "target_metrics": TARGET_METRICS,
@@ -1380,6 +1616,12 @@ def stage4_save_code() -> str:
 
             print(f"Notes template: {RUN_NOTES_FILE}")
             print(f"Run summary: {RUN_SUMMARY_FILE}")
+            print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
+            if captured_notebook_path is None:
+                print(
+                    "Automatic notebook capture was unavailable. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
             if mirrored_output_root is not None:
                 print(f"Drive mirror: {mirrored_output_root}")
             print("Current files under OUTPUT_ROOT:")
@@ -1397,6 +1639,7 @@ def stage4_share_code() -> str:
             """
             from datetime import datetime, timezone
 
+            captured_notebook_path = save_executed_notebook_snapshot()
             mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
             metric_lines = [f"- {metric}: <fill in after review>" for metric in TARGET_METRICS]
             if CONTROL_EVAL.exists():
@@ -1428,6 +1671,7 @@ def stage4_share_code() -> str:
                 f"- RUN_NAME: {RUN_NAME}",
                 *metric_lines,
                 f"- Output folder path: {OUTPUT_ROOT}",
+                f"- Executed notebook archive target: {EXECUTED_NOTEBOOK_PATH}",
             ]
             if mirrored_output_root is not None:
                 share_lines.append(f"- Drive mirror path: {mirrored_output_root}")
@@ -1447,6 +1691,11 @@ def stage4_share_code() -> str:
                 encoding="utf-8",
             )
             print(share_note)
+            if captured_notebook_path is None:
+                print(
+                    "Automatic notebook capture was unavailable. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
             print(f"Saved share note: {SHARE_NOTE_FILE}")
             print(f"Saved completion marker: {COMPLETION_MARKER_FILE}")
             if mirrored_output_root is not None:
@@ -1510,6 +1759,42 @@ def stage5_config_code() -> str:
                 return sorted(versions)
 
 
+            def completed_run_dirs(root: Path, *, run_prefix: str | None = None) -> list[Path]:
+                if not root.exists():
+                    return []
+
+                pattern = re.compile(rf"^{re.escape(run_prefix)}-v(\\d+)$") if run_prefix is not None else None
+                runs: list[Path] = []
+                for child in root.iterdir():
+                    if not child.is_dir():
+                        continue
+                    if not (child / COMPLETION_MARKER_NAME).exists():
+                        continue
+                    if pattern is not None and not pattern.match(child.name):
+                        continue
+                    runs.append(child)
+                return sorted(runs, key=lambda path: (path.stat().st_mtime, path.name))
+
+
+            def default_upstream_path(stage_folder: str, relative_path: str, *, preferred_run_prefix: str | None = None) -> str | None:
+                stage_root = PROJECT_STORAGE_DIR / "artifacts" / stage_folder
+                ordered_runs: list[Path] = []
+
+                if preferred_run_prefix is not None:
+                    ordered_runs.extend(reversed(completed_run_dirs(stage_root, run_prefix=preferred_run_prefix)))
+
+                for run_dir in reversed(completed_run_dirs(stage_root)):
+                    if run_dir not in ordered_runs:
+                        ordered_runs.append(run_dir)
+
+                relative = Path(relative_path)
+                for run_dir in ordered_runs:
+                    candidate = run_dir / relative
+                    if candidate.exists():
+                        return str(candidate)
+                return None
+
+
             RUN_VERSION = max(completed_versions(ARTIFACTS_ROOT, RUN_BASENAME), default=0) + 1
             RUN_NAME = f"{RUN_BASENAME}-v{RUN_VERSION}"
             OUTPUT_ROOT = ARTIFACTS_ROOT / RUN_NAME
@@ -1519,8 +1804,14 @@ def stage5_config_code() -> str:
             RUN_SUMMARY_FILE = OUTPUT_ROOT / "run-summary.json"
             COMPLETION_MARKER_FILE = OUTPUT_ROOT / COMPLETION_MARKER_NAME
 
-            DEFAULT_STAGE4_CONTROL_EVAL = Path("/content/KeelNet-local/artifacts/stage4_colab/naufal-stage4-v1/control_eval.json")
-            MODULAR_BASELINE_EVAL_PATH = str(DEFAULT_STAGE4_CONTROL_EVAL) if DEFAULT_STAGE4_CONTROL_EVAL.exists() else None
+            __NOTEBOOK_ARCHIVE_CONFIG_CODE__
+
+            DEFAULT_STAGE4_CONTROL_EVAL = default_upstream_path(
+                "stage4_colab",
+                "control_eval.json",
+                preferred_run_prefix=f"{AUTHOR_NAME}-stage4",
+            )
+            MODULAR_BASELINE_EVAL_PATH = DEFAULT_STAGE4_CONTROL_EVAL
 
             MODEL_NAME = "distilbert-base-uncased"
             NUM_TRAIN_EPOCHS = 3.0
@@ -1687,6 +1978,7 @@ def stage5_config_code() -> str:
             print(f"Run basename: {RUN_BASENAME}")
             print(f"Run version: v{RUN_VERSION}")
             print(f"Run output dir: {OUTPUT_ROOT}")
+            print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
             print(f"Run marker file: {RUN_MARKER_FILE}")
             print(f"Baseline eval path: {MODULAR_BASELINE_EVAL_PATH}")
             print(f"Learner dir: {LEARNER_DIR}")
@@ -1729,7 +2021,7 @@ def stage5_config_code() -> str:
                     run(cmd)
                 return True
             """
-        ).strip()
+        ).replace("__NOTEBOOK_ARCHIVE_CONFIG_CODE__", NOTEBOOK_ARCHIVE_CONFIG_CODE.rstrip()).strip()
         + "\n"
     )
 
@@ -1749,6 +2041,7 @@ def stage5_save_code() -> str:
     return (
         dedent(
             """
+            captured_notebook_path = save_executed_notebook_snapshot()
             mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
 
             if not RUN_NOTES_FILE.exists():
@@ -1767,6 +2060,7 @@ def stage5_save_code() -> str:
                             f"- Branch: {CURRENT_BRANCH}",
                             f"- `RUN_NAME`: {RUN_NAME}",
                             f"- Output folder: {OUTPUT_ROOT}",
+                            f"- Executed notebook archive target: {EXECUTED_NOTEBOOK_PATH}",
                             f"- Runtime mode: {RUNTIME_MODE}",
                             "",
                             "## Goal",
@@ -1819,6 +2113,10 @@ def stage5_save_code() -> str:
                         "output_root": str(OUTPUT_ROOT),
                         "drive_project_dir": str(DRIVE_PROJECT_DIR) if DRIVE_PROJECT_DIR is not None else None,
                         "mirrored_output_root": str(mirrored_output_root) if mirrored_output_root is not None else None,
+                        "executed_notebook_dir": str(NOTEBOOK_ARCHIVE_DIR),
+                        "executed_notebook_target": str(EXECUTED_NOTEBOOK_PATH),
+                        "executed_notebook_saved": captured_notebook_path is not None,
+                        "executed_notebook_instructions_file": str(EXECUTED_NOTEBOOK_INSTRUCTIONS_FILE),
                         "learner_dir": str(LEARNER_DIR),
                         "learner_eval": str(LEARNER_EVAL),
                         "baseline_eval_path": str(MODULAR_BASELINE_EVAL_PATH) if MODULAR_BASELINE_EVAL_PATH is not None else None,
@@ -1834,6 +2132,12 @@ def stage5_save_code() -> str:
 
             print(f"Notes template: {RUN_NOTES_FILE}")
             print(f"Run summary: {RUN_SUMMARY_FILE}")
+            print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
+            if captured_notebook_path is None:
+                print(
+                    "Automatic notebook capture was unavailable. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
             if mirrored_output_root is not None:
                 print(f"Drive mirror: {mirrored_output_root}")
             print("Current files under OUTPUT_ROOT:")
@@ -1851,6 +2155,7 @@ def stage5_share_code() -> str:
             """
             from datetime import datetime, timezone
 
+            captured_notebook_path = save_executed_notebook_snapshot()
             mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
             metric_lines = [f"- {metric}: <fill in after review>" for metric in TARGET_METRICS]
             if LEARNER_EVAL.exists():
@@ -1891,6 +2196,7 @@ def stage5_share_code() -> str:
                 f"- RUN_NAME: {RUN_NAME}",
                 *metric_lines,
                 f"- Output folder path: {OUTPUT_ROOT}",
+                f"- Executed notebook archive target: {EXECUTED_NOTEBOOK_PATH}",
             ]
             if mirrored_output_root is not None:
                 share_lines.append(f"- Drive mirror path: {mirrored_output_root}")
@@ -1910,6 +2216,11 @@ def stage5_share_code() -> str:
                 encoding="utf-8",
             )
             print(share_note)
+            if captured_notebook_path is None:
+                print(
+                    "Automatic notebook capture was unavailable. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
             print(f"Saved share note: {SHARE_NOTE_FILE}")
             print(f"Saved completion marker: {COMPLETION_MARKER_FILE}")
             if mirrored_output_root is not None:
@@ -1922,6 +2233,7 @@ def stage5_share_code() -> str:
 
 STAGE_2 = {
     "path": REPO_ROOT / "stages/02-evidence-support-verification/notebooks/stage-02-evidence-support-verification-colab.ipynb",
+    "branch": "main",
     "stage_number": 2,
     "stage_label": "Stage 2: Evidence Support Verification",
     "config_markdown": (
@@ -1931,7 +2243,7 @@ STAGE_2 = {
 
             Set `AUTHOR_NAME` to your name. This notebook builds the stage-specific `RUN_NAME` automatically as `yourname-stage2-v1`, `yourname-stage2-v2`, `yourname-stage2-v3`, and so on based on completed runs.
 
-            Set `BASE_QA_MODEL_DIR` to a finished Stage 1 model directory before running the main Stage 2 commands.
+            This notebook first tries to auto-fill `BASE_QA_MODEL_DIR` from the latest completed Stage 1 run under the current artifact root. Override it if you want to compare against a different checkpoint.
 
             This cell also prints the important values you should check before training.
 
@@ -2032,7 +2344,7 @@ GENERIC_STAGES = [
 
                 Set `AUTHOR_NAME` to your name. This notebook builds the stage-specific `RUN_NAME` automatically as `yourname-stage3-v1`, `yourname-stage3-v2`, `yourname-stage3-v3`, and so on based on completed runs.
 
-                Point `BASE_QA_MODEL_DIR` at a finished Stage 1 abstain model and `VERIFIER_MODEL_DIR` at a finished Stage 2 verifier before running the main Stage 3 commands.
+                This notebook first tries to auto-fill `BASE_QA_MODEL_DIR` and `VERIFIER_MODEL_DIR` from the latest completed Stage 1 and Stage 2 runs under the current artifact root. Override them if you want to compare against different checkpoints.
 
                 This cell also prints the important values you should check before running stage commands.
 
@@ -2133,6 +2445,8 @@ GENERIC_STAGES = [
                 <h2 style="color: #1d4ed8;">2. Configure The Run</h2>
 
                 Set `AUTHOR_NAME` to your name. This notebook builds the stage-specific `RUN_NAME` automatically as `yourname-stage4-v1`, `yourname-stage4-v2`, `yourname-stage4-v3`, and so on based on completed runs.
+
+                This notebook first tries to auto-fill `CALIBRATION_EVAL_PATH` from the latest completed Stage 3 run under the current artifact root. Override it if you want to compare against a different calibration pass.
 
                 Review `TARGET_METRICS`, `SUGGESTED_MODULES`, `SMOKE_TEST_COMMANDS`, and `STAGE_COMMANDS` before you move into implementation.
 
@@ -2275,6 +2589,8 @@ GENERIC_STAGES = [
                 <h2 style="color: #1d4ed8;">2. Configure The Run</h2>
 
                 Set `AUTHOR_NAME` to your name. This notebook builds the stage-specific `RUN_NAME` automatically as `yourname-stage5-v1`, `yourname-stage5-v2`, `yourname-stage5-v3`, and so on based on completed runs.
+
+                This notebook first tries to auto-fill `MODULAR_BASELINE_EVAL_PATH` from the latest completed Stage 4 run under the current artifact root. Override it if you want to compare against a different controller baseline.
 
                 Review `TARGET_METRICS`, `SUGGESTED_MODULES`, `SMOKE_TEST_COMMANDS`, and `STAGE_COMMANDS` before you move into implementation.
 
@@ -2471,6 +2787,7 @@ def sync_stage_2() -> None:
     notebook = load_notebook(STAGE_2["path"])
     notebook["cells"][0]["source"] = source_lines(intro_markdown(STAGE_2["stage_label"], STAGE_2["stage_number"]))
     notebook["cells"][2]["source"] = source_lines(SETUP_MARKDOWN)
+    notebook["cells"][3]["source"] = source_lines(setup_code(STAGE_2["branch"]))
     notebook["cells"][4]["source"] = source_lines(STAGE_2["config_markdown"])
     notebook["cells"][6]["source"] = source_lines(VALIDATE_MARKDOWN)
     notebook["cells"][8]["source"] = source_lines(STAGE_2["smoke_markdown"])
