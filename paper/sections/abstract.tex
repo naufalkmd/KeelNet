@@ -5,11 +5,13 @@ decision.
 The current implementation focuses on a Stage 1 setting built on SQuAD~2.0,
 where the model receives a question and a single evidence passage and must
 either return an extractive answer span or abstain when support is insufficient.
-This paper draft presents the motivation, task definition, experimental
-protocol, and current modeling setup for that Stage 1 comparison between an
-answer-only baseline and an abstain-aware variant.
+In the current Stage 1 result, an abstain-aware variant reduces unsupported
+answers on the development split from 100.00\% to 27.97\% and improves
+decision-aware overall $F_1$ from 42.35 to 69.40, while answerable $F_1$
+decreases from 84.82 to 66.76.
+These findings support the core claim that explicit abstention supervision can
+substantially improve answer-versus-abstain behavior, but they also show that
+the current model pays a meaningful answer-quality cost for that gain.
 Later stages are designed to extend this core setup with support verification,
 confidence calibration, retrieval, and adaptive constraint balancing.
-The results section is intentionally scaffolded so the final paper can be
-updated as stable experimental findings arrive.
 \end{abstract}

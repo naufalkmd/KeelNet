@@ -1,12 +1,11 @@
 Table~\ref{tab:stage1-main-results} is the core Stage 1 comparison.
-It should report one stable baseline run and one stable abstain-aware run under
+It reports one stable baseline run and one stable abstain-aware run under
 matched training settings.
 
 \begin{table*}[t]
   \centering
   \caption{Main Stage 1 comparison between the answer-only baseline and the
-  abstain-aware model. Replace the placeholder values once the final runs are
-  selected.}
+  abstain-aware model on the held-out development split.}
   \label{tab:stage1-main-results}
   \small
   \setlength{\tabcolsep}{8pt}
@@ -15,18 +14,25 @@ matched training settings.
     \toprule
     Model & Answerable F1 & Decision-aware Overall F1 & Unsupported Rate & Abstain F1 \\
     \midrule
-    Baseline & TBD & TBD & TBD & N/A \\
-    Abstain-aware & TBD & TBD & TBD & TBD \\
+    Baseline & 84.82 & 42.35 & 100.00 & -- \\
+    Abstain-aware & 66.76 & 69.40 & 27.97 & 72.98 \\
     \bottomrule
   \end{tabular}
 \end{table*}
 
 The baseline is trained only on answerable examples, while the abstain-aware
 variant includes explicit supervision for unanswerable cases.
-A Stage 1 win should be defined conservatively:
-unsupported-answer rate should decrease, answerable performance should remain
-usable, and abstain quality should improve without the model collapsing into
-trivial refusal behavior.
+For Stage 1, a win is defined conservatively: unsupported-answer rate should
+decrease, answerable performance should remain usable, and abstain quality
+should improve without the model collapsing into trivial refusal behavior.
+Under that conservative criterion, the current Stage 1 result is a qualified
+success.
+The abstain-aware model cuts unsupported-answer rate by 72.03 points, from
+100.00\% to 27.97\%, and raises decision-aware overall $F_1$ by 27.05 points,
+from 42.35 to 69.40.
+At the same time, answerable $F_1$ drops by 18.07 points, from 84.82 to 66.76,
+so the improvement comes with a real answer-quality cost rather than a free
+gain.
 
 Because the abstain-aware system uses a validation-selected threshold, the main
 table should be read together with a threshold sweep rather than as a single
@@ -34,51 +40,31 @@ isolated operating point.
 
 \begin{figure}[t]
   \centering
-  \fbox{\rule{0pt}{1.5in}\rule{0.95\linewidth}{0pt}}
-  \caption{Placeholder for the abstain-threshold sweep.
-  The final figure should plot answerable $F_1$, unsupported-answer rate, and
-  abstain $F_1$ against the null-score difference threshold, with the selected
-  threshold marked.}
+  \includegraphics[width=0.95\linewidth]{figures/stage1-threshold-sweep.pdf}
+  \caption{Threshold sweep for the abstain-aware model on the development split.
+  The vertical line marks the validation-selected threshold of $-2.5$.}
   \label{fig:stage1-threshold-sweep}
 \end{figure}
 
-\paragraph{Fill-in summary paragraph.}
-Once the stable runs are selected, this section can be finalized quickly with a
-summary of the following form:
-\begin{quote}
-Compared with the answer-only baseline, the abstain-aware model reduced
-unsupported-answer rate from \textit{[X]} to \textit{[Y]} while answerable
-\(F_1\) changed from \textit{[A]} to \textit{[B]}.
-Decision-aware overall \(F_1\) changed from \textit{[C]} to \textit{[D]}, and
-the validation-selected abstain threshold was \textit{[T]}.
-Taken together, these results suggest \textit{[one-sentence interpretation]}.
-\end{quote}
-
-\paragraph{Fill-in threshold interpretation.}
-The threshold-sweep discussion can also be written from a compact template:
-\begin{quote}
+\paragraph{Threshold interpretation.}
 Figure~\ref{fig:stage1-threshold-sweep} shows the expected trade-off as the
-abstain threshold changes.
-As the threshold moves toward \textit{[direction]}, unsupported-answer rate
-\textit{[decreases/increases]} while answerable \(F_1\)
-\textit{[decreases/increases]}.
-The selected threshold lies in a region where \textit{[brief justification]},
-which suggests the reported gain is \textit{[robust / sensitive]} rather than a
-single brittle operating point.
-\end{quote}
+threshold moves toward less negative values.
+Across the dev sweep from $-3.5$ to $-1.5$, answerable $F_1$ rises from 63.06
+to 69.47, but unsupported-answer rate also rises from 24.71\% to 31.77\%.
+Abstain $F_1$ changes more gently, moving from 73.39 to 71.86 across the same
+range.
+The selected threshold of $-2.5$ sits in the middle of this trade-off region:
+neighboring points at $-3.0$ and $-2.0$ have similar dev overall $F_1$
+(69.29 and 69.17 versus 69.40 at $-2.5$), which suggests that the gain is not
+coming from a single brittle threshold setting.
 
-The final version of this section should answer three questions:
-\begin{enumerate}[leftmargin=1.25em]
-  \item Does abstention supervision reduce unsupported answers?
-  \item How much answer quality is preserved on answerable examples?
-  \item Is the observed gain large enough to justify the extra abstain-aware
-  machinery?
-\end{enumerate}
-
-The final write-up should also include:
-\begin{itemize}[leftmargin=1.25em]
-  \item one short paragraph interpreting the threshold sweep,
-  \item a compact qualitative comparison of representative failure cases, and
-  \item a short note on whether the gain appears to come from better abstention
-  behavior rather than threshold gaming.
-\end{itemize}
+\paragraph{Stage 1 takeaway.}
+The main question for Stage 1 was whether explicit abstention supervision could
+correct the baseline's pathological always-answer behavior.
+On that question, the answer is yes.
+The baseline answers every unsupported example, while the abstain-aware model
+learns a meaningful abstain policy and achieves 72.98 abstain $F_1$ on the dev
+split.
+The cost is that answer extraction quality remains substantially worse than the
+baseline on answerable questions, which gives a clear target for Stage 2 and
+later stages: preserve the abstention gain while recovering answer quality.

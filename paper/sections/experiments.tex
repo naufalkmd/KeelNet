@@ -24,12 +24,13 @@ The decision-aware overall metrics give full credit to correct abstentions on
 unanswerable examples, so they do not penalize uncertainty by construction.
 
 \paragraph{Execution workflow.}
-The current team workflow runs experiments in browser Google Colab while
+The current team workflow runs experiments from browser Google Colab while
 editing source code locally in VS Code.
-Artifacts are saved to Google Drive, and code changes are synchronized through
-Git branches.
-This paper draft should eventually summarize only the stable final settings
-rather than the full engineering workflow.
+The notebook supports both hosted Colab and Colab connected to a local runtime;
+the Stage 1 run reported here used a local runtime backed by the project's WSL
+environment and GPU.
+Artifacts are stored under the project runtime directory, and code changes are
+synchronized through Git branches.
 
 \paragraph{What to lock before the final paper.}
 Before turning this draft into a submission-ready paper, we should freeze:

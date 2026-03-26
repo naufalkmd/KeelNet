@@ -23,27 +23,24 @@ If the provided evidence is incomplete, outdated, or systematically biased, the
 method may still produce a well-grounded but incomplete answer, so groundedness
 should not be confused with neutrality or full real-world balance.
 
-\paragraph{How to interpret a positive result.}
-If Stage 1 shows that unsupported answers fall while answerable performance
-remains reasonably stable, then the main conclusion should be narrow but useful:
-explicit abstention supervision and abstention-aware evaluation can improve the
-answer-versus-abstain trade-off even in a simple extractive QA system.
-That would not explain hallucination in general, but it would support the idea
-that aligned targets and aligned metrics matter.
-
-\paragraph{How to interpret a mixed or negative result.}
-If unsupported answers decrease only when answerable performance collapses, or
-if gains appear only at brittle threshold settings, then Stage 1 should be read
-as evidence that abstention supervision alone is insufficient.
-That outcome would still be valuable because it would justify moving attention
-toward support verification, calibration, or stronger control mechanisms rather
-than over-claiming what a thresholded extractive model can do.
+\paragraph{How to interpret the current result.}
+The Stage 1 run supports a narrow but useful claim:
+explicit abstention supervision and abstention-aware evaluation can strongly
+reduce unsupported answers in a simple extractive QA system.
+The abstain-aware model improves decision-aware overall $F_1$ and cuts
+unsupported-answer rate by more than 70 points relative to the baseline.
+However, the answerable-example drop is large enough that the result should be
+read as a trade-off improvement, not as a generally better QA model.
+That makes the current result encouraging, but not complete.
 
 \paragraph{Why this stage is still useful.}
 Even under its narrow scope, Stage 1 tests one defensible claim with clean
 supervision and interpretable failure modes.
-If Stage 1 cannot show a meaningful trade-off improvement, that is important
-negative evidence before investing in more complex later stages.
+The current run does show a meaningful trade-off improvement, and that is
+important evidence before investing in more complex later stages.
+Just as importantly, it reveals the remaining bottleneck clearly:
+the system needs better support for answer quality once abstention behavior is
+improved.
 
 \paragraph{Next paper-facing extensions.}
 Once Stage 1 is stable, the most natural paper extensions are:
