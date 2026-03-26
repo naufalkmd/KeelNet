@@ -462,3 +462,44 @@ def compute_stage2_support_metrics(
         "answered_count": float(answered_total),
         "gold_supported_count": float(gold_supported_total),
     }
+
+
+def compute_answer_support_mix(
+    predictions: Mapping[str, Mapping[str, Any]],
+    references: Mapping[str, Mapping[str, Any]],
+    *,
+    match_f1_threshold: float,
+) -> dict[str, float]:
+    """Summarize how often answered predictions are actually supported."""
+
+    total_examples = len(references)
+    answered_total = 0
+    supported_answers = 0
+    unsupported_answers = 0
+
+    for example_id, reference in references.items():
+        prediction = predictions.get(example_id, {"decision": "abstain", "answer": ""})
+        if str(prediction.get("decision", "abstain")).lower() != "answer":
+            continue
+
+        answered_total += 1
+        answer_text = str(prediction.get("answer", ""))
+        gold_answers = list(reference.get("answers", []))
+        is_supported = bool(reference.get("is_answerable", False)) and is_supported_answer(
+            answer_text,
+            gold_answers,
+            match_f1_threshold=match_f1_threshold,
+        )
+        if is_supported:
+            supported_answers += 1
+        else:
+            unsupported_answers += 1
+
+    return {
+        "answer_rate": _percentage(answered_total, total_examples),
+        "supported_answer_rate": _percentage(supported_answers, answered_total),
+        "unsupported_among_answers_rate": _percentage(unsupported_answers, answered_total),
+        "answered_count": float(answered_total),
+        "supported_answers_count": float(supported_answers),
+        "unsupported_answers_count": float(unsupported_answers),
+    }
