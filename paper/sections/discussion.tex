@@ -4,7 +4,8 @@ that should be stated clearly.
 
 \paragraph{Current limitations.}
 \begin{itemize}[leftmargin=1.25em]
-  \item The active implementation currently covers Stage 1 and Stage 2 only.
+  \item The active implementation currently covers Stage 1, Stage 2, and
+  Stage 3 only.
   \item The task uses a single provided evidence passage rather than retrieved
   evidence.
   \item The action space is intentionally narrow and does not yet cover richer
@@ -30,19 +31,29 @@ abstention-aware evaluation can strongly reduce unsupported answers in a simple
 extractive QA system.
 Second, the Stage 2 run shows that support verification is learnable on top of
 that abstain-aware base.
-However, the current verifier mostly predicts support rather than intervening
-aggressively enough to shift end-to-end QA behavior.
-The result should therefore be read as a trade-off improvement plus a partially
-successful extension, not yet as a generally better grounded QA model.
+Third, the Stage 3 run shows that both the QA and support scores were indeed
+overconfident and that simple post-hoc temperature scaling can reduce that
+miscalibration substantially.
+However, the calibrated support signal remains noticeably weaker than the QA
+signal and has not yet been turned into a better end-to-end controller.
+The result should therefore be read as a trade-off improvement plus two
+successful intermediate controls, not yet as a generally better grounded QA
+model.
+The strongest interpretation is narrower:
+Stages 1--3 support the usefulness of modular post-hoc controls, but they also
+suggest that modular tuning alone may have limited headroom in this setup.
 
 \paragraph{Why this stage is still useful.}
-Even under its narrow scope, the first two stages now test two defensible
+Even under its narrow scope, the first three stages now test three defensible
 claims with clean supervision and interpretable failure modes.
 Stage 1 shows that abstention can be taught.
 Stage 2 shows that support can be predicted, but also reveals the remaining
-bottleneck clearly:
-the system still needs better calibration and tighter decision control before a
-support signal becomes a strong downstream filter.
+downstream bottleneck clearly.
+Stage 3 then confirms that this bottleneck was not only architectural but also
+statistical:
+the raw confidence scores were too sharp to trust directly.
+After calibration, the QA signal becomes reasonably well behaved, while support
+still remains the noisier control variable.
 
 \paragraph{Legacy plan and revision.}
 The original roadmap after Stage 1 was to move directly from Stage 2 support
@@ -55,16 +66,51 @@ Stage 2 changed that assumption.
 On the dev split, support recall reaches 99.43\%, but support precision is only
 66.62\%, the verifier predicts support for 98.88\% of answered cases, and the
 gated system improves overall \(F_1\) by only 0.03 points.
-So the long-term goal stays the same, but the immediate plan changes:
-calibration now becomes the next dependency rather than optional supporting
-work, because the current support scores are still too permissive for a strong
-fixed controller.
+Stage 3 then validates the revised plan directly.
+Both fitted temperatures saturate at 5.0, dev QA ECE drops from 0.2456 to
+0.0753, and dev support ECE drops from 0.3326 to 0.1708, but support still
+remains less calibrated than QA after the fix.
+So the long-term goal stays the same, and the immediate plan is now clearer
+than before:
+Stage 4 should operate on calibrated signals rather than raw ones, because the
+current support scores were too permissive before calibration and are only now
+approaching the level needed for stronger control.
+
+\paragraph{From modular tuning to constrained learning.}
+The current results also motivate a deeper paper-level pivot.
+They do not show that modular design is misguided:
+each module adds useful information.
+What they do show is that separately trained and separately tuned modules do
+not automatically solve the end-to-end answer-support-abstain problem.
+The remaining gap is therefore best interpreted as an objective mismatch.
+The system still learns mainly for answer extraction and only later receives
+support and abstention corrections.
+That observation motivates a revised next-stage comparison in which the current
+modular pipeline is treated as the baseline and a support-constrained learning
+objective is treated as the new method.
+Under that framing, the earlier experiments become evidence for the limitation
+of post-hoc modular control in this setting rather than failed attempts that
+should be discarded.
+The key methodological point is that this Stage 5 learner does not need to be
+larger or more exotic than the modular baseline.
+It can use the same encoder family and the same data while changing only the
+training target:
+answer extraction, support, and abstention are optimized jointly by a
+shared-encoder multi-head model instead of in three separate stages.
+That makes the next comparison much cleaner.
+If the new learner wins, the gain is much easier to attribute to objective
+design rather than to extra model capacity or a looser evaluation setup.
 
 \paragraph{Next paper-facing extensions.}
-With Stage 1 and Stage 2 now in place, the most natural paper extensions are:
+With Stage 1, Stage 2, and Stage 3 now in place, the most natural paper
+extensions are:
 \begin{itemize}[leftmargin=1.25em]
-  \item calibrating confidence against correctness and support,
-  \item making the verifier less permissive on unsupported answers,
+  \item using the calibrated QA and support signals in a tighter fixed
+  controller as the strongest modular baseline,
+  \item comparing that modular baseline directly against a
+  support-constrained learning objective trained under matched conditions,
+  \item making the verifier less permissive on unsupported answers even after
+  calibration if the modular baseline is still too weak,
   \item testing retrieval noise, and
   \item comparing adaptive balancing against simpler fixed baselines.
 \end{itemize}

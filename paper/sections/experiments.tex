@@ -12,6 +12,9 @@ For the abstain-aware setting, both answerable and unanswerable cases are kept.
 For Stage 2, the verifier is trained on examples derived from the Stage 1 QA
 outputs so that each instance contains a question, a passage, a predicted
 answer, and a support label.
+For Stage 3, the Stage 1 abstain-aware model and the Stage 2 verifier are kept
+fixed, and calibration is fit post hoc on the validation split before raw and
+calibrated confidence behavior is reported on the development split.
 
 \paragraph{Evaluation.}
 Model outputs are post-processed into final decisions and scored with:
@@ -28,23 +31,49 @@ unanswerable examples, so they do not penalize uncertainty by construction.
 For Stage 2, we additionally report support accuracy, precision, recall, and
 F1, together with supported-answer rate and contradiction rate for the verifier
 and its downstream gated QA behavior.
+For Stage 3, we additionally report expected calibration error (ECE), adaptive
+ECE, maximum calibration error (MCE), Brier score, threshold-gap statistics,
+score-label correlation, and reliability diagrams for both the QA decision
+signal and the support signal.
+For the next comparison stage, the same core metrics should be kept while
+adding a controller-facing view:
+supported-answer rate among answered cases, answer rate, and the selected
+unsupported-answer budget.
 
 \paragraph{Execution workflow.}
 The current team workflow runs experiments from browser Google Colab while
 editing source code locally in VS Code.
 The notebook supports both hosted Colab and Colab connected to a local runtime;
-the Stage 1 and Stage 2 runs reported here used a local runtime backed by the
-project's WSL environment and GPU.
+the Stage 1, Stage 2, and Stage 3 runs reported here used a local runtime
+backed by the project's WSL environment and GPU.
 Artifacts are stored under the project runtime directory, and code changes are
 synchronized through Git branches.
+
+\paragraph{Next-stage comparison design.}
+The next experimental comparison should hold the backbone, split, tokenizer,
+and evaluation protocol fixed while varying only the decision formulation.
+The most informative comparison is:
+\begin{enumerate}[leftmargin=1.25em]
+  \item the current modular pipeline
+  (Stage 1 abstention, Stage 2 verifier, Stage 3 calibration),
+  \item a fixed constrained controller over calibrated QA and support signals,
+  and
+  \item a jointly trained support-constrained multi-head learner that keeps
+  the same encoder, tokenizer, split, and core QA supervision but replaces
+  post-hoc control with an answer-support-abstain objective.
+\end{enumerate}
+Under this design, the key question is not whether one more module can be
+bolted on, but whether a direct constrained objective improves the final
+answer-support-abstain trade-off beyond what post-hoc modular tuning can
+achieve.
 
 \paragraph{What to lock before the final paper.}
 Before turning this draft into a submission-ready paper, we should freeze:
 \begin{itemize}[leftmargin=1.25em]
   \item the final model checkpoint choice,
-  \item the exact QA and verifier threshold-selection policies,
-  \item the final metric table,
+  \item the exact QA, verifier, calibration, and controller-selection policies,
+  \item the final metric tables and reliability figure,
   \item at least one qualitative error analysis slice, and
-  \item the figure or table that best shows the utility-versus-abstention
-  trade-off.
+  \item the figure or table that best shows the utility-versus-groundedness
+  trade-off for modular versus constrained-learning approaches.
 \end{itemize}

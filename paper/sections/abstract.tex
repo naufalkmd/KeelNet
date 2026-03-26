@@ -2,7 +2,7 @@
 \system\ studies a narrower and more operational version of hallucination control:
 evidence-grounded question answering with an explicit answer-or-\abstain\
 decision.
-The current implementation now reports two stages on SQuAD~2.0 with one
+The current implementation now reports three stages on SQuAD~2.0 with one
 question and one evidence passage as input.
 Stage 1 compares an answer-only baseline with an abstain-aware variant; the
 abstain-aware model reduces unsupported answers on the development split from
@@ -13,9 +13,22 @@ The verifier reaches 79.79 support $F_1$ on the development split at a selected
 support threshold of 0.25, but the resulting gated QA system changes end-to-end
 metrics only marginally: overall $F_1$ moves from 69.40 to 69.42, unsupported
 answer rate from 27.97\% to 27.57\%, and answerable $F_1$ from 66.76 to 66.41.
-These findings support the claim that explicit abstention supervision and
-support verification are both learnable, but they also show that the current
-support-gating policy is too permissive to deliver a large end-to-end gain.
-That result motivates the next stages on calibration, tighter unsupported-answer
-control, retrieval, and adaptive constraint balancing.
+Stage 3 then calibrates the Stage 1 QA decision score and the Stage 2 support
+score with scalar temperature scaling.
+On the development split, QA ECE falls from 0.2456 to 0.0753 and support ECE
+falls from 0.3326 to 0.1708; both fitted temperatures saturate at 5.0, which
+reveals strong overconfidence in the raw scores.
+These findings support the claim that explicit abstention supervision, support
+verification, and post-hoc calibration are all useful intermediate controls,
+but they also show that the support signal remains the weaker part of the
+pipeline even after calibration.
+Taken together, the first three stages are best read as evidence for the
+limits of post-hoc modular tuning in this setting:
+each module improves part of the behavior, but the end-to-end
+answer-support-abstain trade-off remains under-specified.
+That result motivates a revised next step for the paper:
+compare the current modular pipeline against a jointly trained
+support-constrained multi-head learner that shares the same backbone and
+optimizes answer extraction, support, and abstention under explicit
+unsupported-answer and over-abstention costs.
 \end{abstract}

@@ -1,9 +1,10 @@
 This draft paper frames \system\ as a staged research program for
 evidence-grounded question answering with controlled abstention.
-The current implemented contribution now covers Stage 1 and Stage 2 under a
-controlled SQuAD~2.0 setting: first an answer-only baseline versus an
-abstain-aware alternative, then a learned support verifier on top of the
-abstain-aware system.
+The current implemented contribution now covers Stage 1, Stage 2, and Stage 3
+under a controlled SQuAD~2.0 setting:
+first an answer-only baseline versus an abstain-aware alternative, then a
+learned support verifier on top of the abstain-aware system, and finally a
+post-hoc calibration step over the QA and support scores.
 
 The current evidence is encouraging but mixed in the right way for a staged
 project.
@@ -12,9 +13,25 @@ overall performance, but it still gives up too much answerable-question
 quality.
 Stage 2 then shows that support verification is learnable, yet the present
 gating policy is too permissive to create a large end-to-end gain.
-That means the project has cleared two useful bars:
-abstention supervision works, and support prediction is viable.
+Stage 3 confirms that this permissiveness was accompanied by serious
+overconfidence in both score streams and shows that simple scalar temperature
+scaling can reduce that miscalibration substantially, although support remains
+the weaker signal even after calibration.
+That means the project has cleared three useful bars:
+abstention supervision works, support prediction is viable, and post-hoc
+calibration improves the quality of the control signals.
 At the same time, the results sharply motivate the next stages, especially
-calibration and tighter unsupported-answer control, because they now look like
-the missing pieces needed to turn a learned support signal into a stronger
-downstream decision policy.
+tighter unsupported-answer control, because the remaining question is no longer
+whether confidence can be calibrated at all, but whether calibrated QA and
+support signals can finally be combined into a materially better downstream
+decision policy.
+That motivates a more explicit next-step formulation for the paper:
+use the existing modular pipeline as a strong baseline, then compare it against
+a jointly trained support-constrained multi-head learner that optimizes answer
+extraction, support, and abstention under explicit unsupported-answer and
+over-abstention costs while keeping the same encoder family and core dataset
+setup.
+If that comparison succeeds under matched conditions, the contribution becomes
+more than a staged tuning project;
+it becomes evidence that grounded QA is better treated as a constrained
+decision problem than as answer prediction followed by post-hoc fixes.

@@ -20,6 +20,20 @@ Stage 1 compares two training regimes:
 Stage 2 then adds a verifier over question, passage, and predicted answer in
 order to estimate whether an answer is actually supported before it is shown to
 the user.
+Stage 3 keeps the Stage 1 and Stage 2 models fixed and calibrates their score
+outputs so that later control stages can act on better-behaved confidence
+signals rather than raw overconfident values.
+Taken together, these stages are no longer just incremental modules;
+they are also diagnostic experiments.
+Stage 1 shows that abstention supervision can change behavior but does not
+fully preserve answer quality, Stage 2 shows that support is learnable but only
+weakly changes end-to-end behavior when used as a permissive post-hoc gate,
+and Stage 3 shows that both score streams are overconfident before
+calibration.
+This sequence suggests that the remaining bottleneck is not only model quality,
+but also objective mismatch:
+the system is still trained and selected mostly around answer correctness, then
+patched afterward with separate support and abstention controls.
 
 The central hypothesis is simple:
 explicit abstention supervision should reduce unsupported answers without
@@ -30,6 +44,14 @@ and calibrated uncertainty.
 The next immediate question is whether a learned support signal can recover some
 of the remaining quality-versus-grounding gap without undoing the abstention
 gain from Stage 1.
+The current paper now motivates a second hypothesis for the next phase:
+post-hoc modular tuning has limited headroom in this setting, so a better
+formulation should treat evidence-grounded QA as a support-constrained learning
+problem rather than as answer prediction followed by separate filters.
+Concretely, the next comparison keeps the same backbone and supervision source
+but replaces the staged pipeline with a jointly trained answer-support-abstain
+objective, so the paper can test whether the gain comes from changing the
+learning target rather than from adding yet another module.
 
 The intended application setting is also narrow.
 \system\ is most naturally suited to bounded, evidence-grounded QA scenarios in
@@ -48,6 +70,12 @@ evidence-grounded QA system can be trained and evaluated so that abstention is
 treated as a useful target behavior instead of a failure by default, and
 Stage 2 tests whether a learned support verifier can improve downstream
 answer-versus-abstain decisions on top of that base system.
+Stage 3 then asks whether those QA and support scores can be calibrated enough
+to serve as credible control variables in the next stage.
+If those stages succeed only partially, that is still informative:
+it supports a reformulation in which future stages compare the current modular
+pipeline against a direct support-constrained multi-head learner under matched
+data, backbone, and evaluation conditions.
 
 This LaTeX scaffold is intentionally written as a living project paper.
 Some sections already reflect stable design decisions, while others are
