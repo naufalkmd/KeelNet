@@ -4,15 +4,18 @@
 
 This document contains both the long-term direction and the current working scope.
 
-The **current decision** is to work only on a narrow Stage 1 version of the project:
+The **current decision** after finishing Stage 1 is to keep the same narrow
+evidence-grounded QA framing while moving into the next proof stages in a
+controlled order:
 
-- task: `question + one evidence passage -> short answer or ABSTAIN`
-- dataset: `SQuAD 2.0` only
-- model scope: one small baseline model, compared with the same model trained with explicit `ABSTAIN` supervision
-- primary metric: unsupported-answer rate
-- secondary metrics: answer `F1` and abstain `F1`
-- current interpretation: this is the first concrete version of balancing answer quality against unsupported answering
-- output policy: keep the external action binary for Stage 1, even if later models expose internal scores
+- keep the task as `question + one evidence passage -> short answer or ABSTAIN`
+- keep `SQuAD 2.0` as the controlled setting for the core proof path
+- treat Stage 1 as the proof-of-concept that explicit abstention supervision changes answer-versus-abstain behavior
+- finish Stage 2 next so support verification becomes a real measured signal instead of only a planned signal
+- prioritize Stage 4 after Stage 2 because it directly tests whether accuracy-only model selection hides unsupported confident answers
+- treat Stage 6 as the strongest novelty target if Stage 4 already shows a meaningful fixed-control gain
+- keep Stage 5 as the realism extension, not the immediate next proof step
+- keep the external action binary even when later stages add internal support, confidence, or control scores
 
 ### Stage 1 Decision Snapshot
 
@@ -27,6 +30,35 @@ Use this as the active project rule:
 The concrete execution plan for this stage is in:
 
 - `stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`
+
+### Current Claim Direction
+
+The working research claim is now:
+
+> In evidence-grounded QA, selecting systems by answer accuracy alone is
+> insufficient because it ignores unsupported confident answers. Adding
+> abstention, support verification, and later confidence-aware control should
+> produce a better safety-utility trade-off.
+
+This is intentionally narrower than:
+
+> beat standard accuracy metrics
+
+The project should instead aim to show that accuracy-only selection is an
+insufficient decision rule for grounded QA when unsupported answers and
+over-abstention both matter.
+
+### Current Stage Priority
+
+Use this order unless the results force a change:
+
+1. `Stage 2`: evidence support verification
+2. `Stage 4`: unsupported-confidence control
+3. `Stage 6`: adaptive constraint balancing, if Stage 4 already works
+4. `Stage 5`: retrieval-grounded realism check after the controlled proof path
+
+`Stage 3` remains useful supporting work, but it should not be the headline
+contribution on its own.
 
 Explicitly out of scope for now:
 

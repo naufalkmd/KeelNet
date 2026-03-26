@@ -27,13 +27,18 @@ Interpretation:
 - Stage `05` checks whether the mechanism survives realistic retrieval noise.
 - Stage `06` checks whether the full pipeline beats simpler fixed balancing baselines.
 
-The current active implementation stage is:
+Current execution priority:
 
-- `01-grounded-abstention-baseline`
+- `02-evidence-support-verification`
+- `04-unsupported-confidence-control`
+- `06-adaptive-constraint-balancing`
+- `05-retrieval-grounded-qa` after the controlled proof path is stable
 
-Only Stage `01` currently has a full supporting implementation under `src/keelnet`.
+Current implementation status:
 
-Stages `02` to `06` already have teammate notebook templates, but the stage-specific Python code and commands for those stages still need to be defined during implementation.
+- Stage `01` has the completed supporting implementation and reference results
+- Stage `02` now has a supporting implementation under `src/keelnet`, but still needs a validated full run before it is considered complete
+- Stages `03` to `06` have teammate notebooks and a shared workflow, but their full stage-specific Python code paths still need to be completed during implementation
 
 Current active stage files:
 

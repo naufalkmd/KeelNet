@@ -141,8 +141,9 @@ Important:
 
 Important:
 
-- Stage 1 is the only fully implemented code path in `src/keelnet` right now
-- Stages 2 to 6 already have teammate notebooks, but their Section 5 cells stay template-like until you define the stage-specific commands and modules
+- Stage 1 has the completed reference run and report-ready baseline comparison
+- Stage 2 now has an implemented verifier code path and notebook commands, but you still need a real full run with `verifier_eval.json` before calling it done
+- Stages 3 to 6 already have teammate notebooks and a shared workflow, but their stage-specific code paths still need to be implemented stage by stage
 
 ## 2. Start Of A Stage
 
@@ -202,6 +203,15 @@ Before a long run, confirm:
 2. `Artifacts root` points to your Drive folder in hosted Colab or your local project folder in local runtime
 3. `Run output dir` points to your unique run folder
 4. `CUDA available: True` for full runs
+
+Recommended execution priority after Stage 1:
+
+1. finish Stage 2 with a real verifier run and saved `verifier_eval.json`
+2. prioritize Stage 4 next because it directly supports the claim that accuracy-only selection misses unsupported confident answers
+3. use Stage 6 after Stage 4 if you want the strongest novelty claim
+4. use Stage 5 after the controlled proof path when you want a realism check under retrieval noise
+
+Do not center the project claim on Stage 3 alone or on beating raw answer accuracy by itself.
 
 ## 3. Editing Loop
 
