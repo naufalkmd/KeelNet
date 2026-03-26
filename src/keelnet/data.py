@@ -1,11 +1,17 @@
-"""Dataset loading and preprocessing for Stage 1."""
+"""Dataset loading and preprocessing for Stage 1 and Stage 2."""
 
 from __future__ import annotations
 
+import random
+import re
 from collections.abc import Mapping
 from typing import Any
 
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
+
+from keelnet.metrics import f1_score, metric_max_over_ground_truths, normalize_answer
+
+_WORD_PATTERN = re.compile(r"\b\w+(?:[-']\w+)*\b")
 
 
 def is_answerable(example: Mapping[str, Any]) -> bool:
@@ -71,6 +77,122 @@ def build_reference_index(dataset: Dataset) -> dict[str, dict[str, Any]]:
             "is_answerable": is_answerable(example),
         }
     return references
+
+
+def format_verification_query(question: str, candidate_answer: str) -> str:
+    """Format the Stage 2 verifier prompt."""
+
+    return f"Question: {question}\nAnswer: {candidate_answer}"
+
+
+def _sample_negative_answer(
+    context: str,
+    gold_answers: list[str],
+    rng: random.Random,
+    *,
+    max_tokens: int = 6,
+    max_overlap_f1: float = 0.5,
+) -> str:
+    """Sample a deterministic but diverse unsupported answer span from the context."""
+
+    matches = list(_WORD_PATTERN.finditer(context))
+    if not matches:
+        return "unsupported"
+
+    normalized_gold = {
+        normalize_answer(answer)
+        for answer in gold_answers
+        if normalize_answer(answer)
+    }
+    max_tokens = max(1, min(max_tokens, len(matches)))
+
+    for _ in range(64):
+        start_index = rng.randrange(len(matches))
+        span_length = rng.randint(1, min(max_tokens, len(matches) - start_index))
+        end_index = start_index + span_length - 1
+        candidate = context[matches[start_index].start() : matches[end_index].end()].strip()
+        normalized_candidate = normalize_answer(candidate)
+        if not normalized_candidate or normalized_candidate in normalized_gold:
+            continue
+        if gold_answers and metric_max_over_ground_truths(f1_score, candidate, gold_answers) >= max_overlap_f1:
+            continue
+        return candidate
+
+    for match in matches:
+        candidate = match.group(0).strip()
+        normalized_candidate = normalize_answer(candidate)
+        if not normalized_candidate or normalized_candidate in normalized_gold:
+            continue
+        if gold_answers and metric_max_over_ground_truths(f1_score, candidate, gold_answers) >= max_overlap_f1:
+            continue
+        return candidate
+
+    return "unsupported"
+
+
+def build_stage2_verification_splits(
+    splits: DatasetDict,
+    *,
+    seed: int,
+    negatives_per_answerable: int,
+    negatives_per_unanswerable: int,
+) -> DatasetDict:
+    """Create Stage 2 verification examples from Stage 1 raw splits."""
+
+    verification_splits: dict[str, Dataset] = {}
+    for split_offset, split_name in enumerate(("train", "validation", "dev")):
+        rng = random.Random(seed + split_offset)
+        records: list[dict[str, Any]] = []
+
+        for example in splits[split_name]:
+            example_id = str(example["id"])
+            question = str(example["question"])
+            context = str(example["context"])
+            gold_answers = [str(answer) for answer in example["answers"]["text"]]
+            answerable = bool(gold_answers)
+
+            if answerable:
+                records.append(
+                    {
+                        "id": f"{example_id}::supported",
+                        "source_example_id": example_id,
+                        "question": question,
+                        "context": context,
+                        "candidate_answer": gold_answers[0],
+                        "support_label": 1,
+                        "source_kind": "gold-answer",
+                    }
+                )
+                for negative_index in range(negatives_per_answerable):
+                    records.append(
+                        {
+                            "id": f"{example_id}::negative::{negative_index}",
+                            "source_example_id": example_id,
+                            "question": question,
+                            "context": context,
+                            "candidate_answer": _sample_negative_answer(context, gold_answers, rng),
+                            "support_label": 0,
+                            "source_kind": "sampled-answerable-negative",
+                        }
+                    )
+                continue
+
+            for negative_index in range(negatives_per_unanswerable):
+                records.append(
+                    {
+                        "id": f"{example_id}::unsupported::{negative_index}",
+                        "source_example_id": example_id,
+                        "question": question,
+                        "context": context,
+                        "candidate_answer": _sample_negative_answer(context, [], rng),
+                        "support_label": 0,
+                        "source_kind": "sampled-unanswerable-negative",
+                    }
+                )
+
+        verification_splits[split_name] = Dataset.from_list(records)
+
+    return DatasetDict(verification_splits)
 
 
 def prepare_train_features(examples, tokenizer, max_length: int, doc_stride: int):
@@ -170,4 +292,27 @@ def prepare_eval_features(examples, tokenizer, max_length: int, doc_stride: int)
 
     tokenized_examples["example_id"] = example_ids
     tokenized_examples["cls_index"] = cls_indices
+    return tokenized_examples
+
+
+def prepare_verification_features(examples, tokenizer, max_length: int):
+    """Tokenize Stage 2 verifier examples."""
+
+    queries = [
+        format_verification_query(question, candidate_answer)
+        for question, candidate_answer in zip(
+            examples["question"],
+            examples["candidate_answer"],
+            strict=False,
+        )
+    ]
+    tokenized_examples = tokenizer(
+        queries,
+        examples["context"],
+        truncation="only_second",
+        max_length=max_length,
+        padding="max_length",
+    )
+    if "support_label" in examples:
+        tokenized_examples["labels"] = examples["support_label"]
     return tokenized_examples

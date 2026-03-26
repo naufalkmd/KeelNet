@@ -44,14 +44,14 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _predict_raw(trainer: Trainer, eval_dataset):
+def predict_raw_qa_outputs(trainer: Trainer, eval_dataset):
     output = trainer.predict(eval_dataset)
     if isinstance(output.predictions, tuple):
         return tuple(np.asarray(item) for item in output.predictions[:2])
     raise ValueError("Expected tuple predictions with start/end logits.")
 
 
-def _prepare_eval_artifacts(raw_dataset, tokenizer, max_length: int, doc_stride: int):
+def prepare_qa_eval_artifacts(raw_dataset, tokenizer, max_length: int, doc_stride: int):
     eval_features = raw_dataset.map(
         lambda batch: prepare_eval_features(batch, tokenizer, max_length, doc_stride),
         batched=True,
@@ -62,7 +62,7 @@ def _prepare_eval_artifacts(raw_dataset, tokenizer, max_length: int, doc_stride:
     return eval_features, eval_dataset_for_model
 
 
-def _search_threshold(
+def search_abstain_threshold(
     examples,
     features,
     raw_predictions,
@@ -121,21 +121,21 @@ def main() -> None:
 
     validation_examples = splits["validation"]
     dev_examples = splits["dev"]
-    validation_features, validation_model_dataset = _prepare_eval_artifacts(
+    validation_features, validation_model_dataset = prepare_qa_eval_artifacts(
         validation_examples,
         tokenizer,
         args.max_length,
         args.doc_stride,
     )
-    dev_features, dev_model_dataset = _prepare_eval_artifacts(
+    dev_features, dev_model_dataset = prepare_qa_eval_artifacts(
         dev_examples,
         tokenizer,
         args.max_length,
         args.doc_stride,
     )
 
-    validation_raw_predictions = _predict_raw(trainer, validation_model_dataset)
-    dev_raw_predictions = _predict_raw(trainer, dev_model_dataset)
+    validation_raw_predictions = predict_raw_qa_outputs(trainer, validation_model_dataset)
+    dev_raw_predictions = predict_raw_qa_outputs(trainer, dev_model_dataset)
 
     validation_references = build_reference_index(validation_examples)
     dev_references = build_reference_index(dev_examples)
@@ -145,7 +145,7 @@ def main() -> None:
     threshold_sweep: dict[str, list[dict[str, float]]] | None = None
     allow_abstain = args.mode == RUN_MODE_ABSTAIN
     if allow_abstain:
-        threshold, validation_metrics, validation_sweep = _search_threshold(
+        threshold, validation_metrics, validation_sweep = search_abstain_threshold(
             validation_examples,
             validation_features,
             validation_raw_predictions,
@@ -156,7 +156,7 @@ def main() -> None:
             threshold_max=args.threshold_max,
             threshold_step=args.threshold_step,
         )
-        _, _, dev_sweep = _search_threshold(
+        _, _, dev_sweep = search_abstain_threshold(
             dev_examples,
             dev_features,
             dev_raw_predictions,
