@@ -124,7 +124,8 @@ def setup_code(branch: str) -> str:
 
 
             GIT_REPO_URL = "https://github.com/naufalkmd/KeelNet.git"
-            GIT_BRANCH = {branch!r}
+            DEFAULT_GIT_BRANCH = {branch!r}
+            GIT_BRANCH = os.environ.get("KEELNET_GIT_BRANCH", DEFAULT_GIT_BRANCH)
             HOSTED_COLAB_PROJECT_DIR = Path("/content/drive/MyDrive/KeelNet")
             DEFAULT_LOCAL_PROJECT_DIR = Path("/content/KeelNet-local")
             DEFAULT_LOCAL_REPO_DIR = Path("/content/KeelNet")
@@ -2013,7 +2014,7 @@ STAGE_2 = {
 GENERIC_STAGES = [
     {
         "path": REPO_ROOT / "stages/03-confidence-calibration/notebooks/stage-03-confidence-calibration-colab.ipynb",
-        "branch": "stage/03-confidence-calibration",
+        "branch": "main",
         "stage_number": 3,
         "stage_label": "Stage 3: Confidence Calibration",
         "objective": "Calibrate QA and verifier scores so they become trustworthy control signals instead of raw uncalibrated logits.",
@@ -2115,7 +2116,7 @@ GENERIC_STAGES = [
     },
     {
         "path": REPO_ROOT / "stages/04-unsupported-confidence-control/notebooks/stage-04-unsupported-confidence-control-colab.ipynb",
-        "branch": "stage/04-unsupported-confidence-control",
+        "branch": "main",
         "stage_number": 4,
         "stage_label": "Stage 4: Unsupported-Confidence Control",
         "objective": "Use calibrated QA and support signals to reduce confident unsupported answers without collapsing usefulness.",
@@ -2217,7 +2218,7 @@ GENERIC_STAGES = [
     },
     {
         "path": REPO_ROOT / "stages/05-retrieval-grounded-qa/notebooks/stage-05-support-constrained-learning-colab.ipynb",
-        "branch": "stage/05-retrieval-grounded-qa",
+        "branch": "main",
         "stage_number": 5,
         "stage_label": "Stage 5: Support-Constrained Learning Comparison",
         "objective": "Compare the best modular pipeline against a direct support-constrained learning objective under matched conditions.",
@@ -2359,7 +2360,7 @@ GENERIC_STAGES = [
     },
     {
         "path": REPO_ROOT / "stages/06-adaptive-constraint-balancing/notebooks/stage-06-adaptive-constraint-balancing-colab.ipynb",
-        "branch": "stage/06-adaptive-constraint-balancing",
+        "branch": "main",
         "stage_number": 6,
         "stage_label": "Stage 6: Adaptive Constraint Balancing",
         "objective": "Only if needed, beat the strongest earlier fixed or constrained baseline by adapting the trade-off among answer quality, support, abstention, and confidence.",
