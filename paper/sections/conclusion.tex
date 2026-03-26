@@ -1,16 +1,20 @@
 This draft paper frames \system\ as a staged research program for
 evidence-grounded question answering with controlled abstention.
-The current implemented contribution is a narrow Stage 1 study that compares an
-answer-only baseline with an abstain-aware alternative under a controlled
-SQuAD~2.0 setting.
+The current implemented contribution now covers Stage 1 and Stage 2 under a
+controlled SQuAD~2.0 setting: first an answer-only baseline versus an
+abstain-aware alternative, then a learned support verifier on top of the
+abstain-aware system.
 
-The current Stage 1 evidence is encouraging but mixed in the right way for a
-first controlled result.
-The abstain-aware model substantially improves unsupported-answer behavior and
-decision-aware overall performance, but it still gives up too much answerable
-question quality.
-That means the project has cleared its first bar: abstention supervision is
-useful enough to justify the line of work.
-At the same time, the result sharply motivates the next stages, especially
-support verification and calibration, because they offer plausible ways to keep
-the abstention gain while recovering lost answer quality.
+The current evidence is encouraging but mixed in the right way for a staged
+project.
+Stage 1 substantially improves unsupported-answer behavior and decision-aware
+overall performance, but it still gives up too much answerable-question
+quality.
+Stage 2 then shows that support verification is learnable, yet the present
+gating policy is too permissive to create a large end-to-end gain.
+That means the project has cleared two useful bars:
+abstention supervision works, and support prediction is viable.
+At the same time, the results sharply motivate the next stages, especially
+calibration and tighter unsupported-answer control, because they now look like
+the missing pieces needed to turn a learned support signal into a stronger
+downstream decision policy.

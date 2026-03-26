@@ -9,6 +9,9 @@ splits from SQuAD~2.0.
 For the answer-only baseline, the training set is restricted to answerable
 examples.
 For the abstain-aware setting, both answerable and unanswerable cases are kept.
+For Stage 2, the verifier is trained on examples derived from the Stage 1 QA
+outputs so that each instance contains a question, a passage, a predicted
+answer, and a support label.
 
 \paragraph{Evaluation.}
 Model outputs are post-processed into final decisions and scored with:
@@ -22,13 +25,16 @@ Model outputs are post-processed into final decisions and scored with:
 \end{itemize}
 The decision-aware overall metrics give full credit to correct abstentions on
 unanswerable examples, so they do not penalize uncertainty by construction.
+For Stage 2, we additionally report support accuracy, precision, recall, and
+F1, together with supported-answer rate and contradiction rate for the verifier
+and its downstream gated QA behavior.
 
 \paragraph{Execution workflow.}
 The current team workflow runs experiments from browser Google Colab while
 editing source code locally in VS Code.
 The notebook supports both hosted Colab and Colab connected to a local runtime;
-the Stage 1 run reported here used a local runtime backed by the project's WSL
-environment and GPU.
+the Stage 1 and Stage 2 runs reported here used a local runtime backed by the
+project's WSL environment and GPU.
 Artifacts are stored under the project runtime directory, and code changes are
 synchronized through Git branches.
 
@@ -36,7 +42,7 @@ synchronized through Git branches.
 Before turning this draft into a submission-ready paper, we should freeze:
 \begin{itemize}[leftmargin=1.25em]
   \item the final model checkpoint choice,
-  \item the exact threshold-selection policy,
+  \item the exact QA and verifier threshold-selection policies,
   \item the final metric table,
   \item at least one qualitative error analysis slice, and
   \item the figure or table that best shows the utility-versus-abstention

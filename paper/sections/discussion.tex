@@ -4,7 +4,7 @@ that should be stated clearly.
 
 \paragraph{Current limitations.}
 \begin{itemize}[leftmargin=1.25em]
-  \item The active implementation is limited to Stage 1.
+  \item The active implementation currently covers Stage 1 and Stage 2 only.
   \item The task uses a single provided evidence passage rather than retrieved
   evidence.
   \item The action space is intentionally narrow and does not yet cover richer
@@ -24,29 +24,47 @@ method may still produce a well-grounded but incomplete answer, so groundedness
 should not be confused with neutrality or full real-world balance.
 
 \paragraph{How to interpret the current result.}
-The Stage 1 run supports a narrow but useful claim:
-explicit abstention supervision and abstention-aware evaluation can strongly
-reduce unsupported answers in a simple extractive QA system.
-The abstain-aware model improves decision-aware overall $F_1$ and cuts
-unsupported-answer rate by more than 70 points relative to the baseline.
-However, the answerable-example drop is large enough that the result should be
-read as a trade-off improvement, not as a generally better QA model.
-That makes the current result encouraging, but not complete.
+The current evidence supports two related but different claims.
+First, the Stage 1 run shows that explicit abstention supervision and
+abstention-aware evaluation can strongly reduce unsupported answers in a simple
+extractive QA system.
+Second, the Stage 2 run shows that support verification is learnable on top of
+that abstain-aware base.
+However, the current verifier mostly predicts support rather than intervening
+aggressively enough to shift end-to-end QA behavior.
+The result should therefore be read as a trade-off improvement plus a partially
+successful extension, not yet as a generally better grounded QA model.
 
 \paragraph{Why this stage is still useful.}
-Even under its narrow scope, Stage 1 tests one defensible claim with clean
-supervision and interpretable failure modes.
-The current run does show a meaningful trade-off improvement, and that is
-important evidence before investing in more complex later stages.
-Just as importantly, it reveals the remaining bottleneck clearly:
-the system needs better support for answer quality once abstention behavior is
-improved.
+Even under its narrow scope, the first two stages now test two defensible
+claims with clean supervision and interpretable failure modes.
+Stage 1 shows that abstention can be taught.
+Stage 2 shows that support can be predicted, but also reveals the remaining
+bottleneck clearly:
+the system still needs better calibration and tighter decision control before a
+support signal becomes a strong downstream filter.
+
+\paragraph{Legacy plan and revision.}
+The original roadmap after Stage 1 was to move directly from Stage 2 support
+verification into Stage 4 unsupported-confidence control, while treating
+Stage 3 calibration as supporting work and deferring retrieval to a later
+realism check.
+That legacy plan assumed that once support became learnable, the raw verifier
+scores would already be good enough to drive downstream control.
+Stage 2 changed that assumption.
+On the dev split, support recall reaches 99.43\%, but support precision is only
+66.62\%, the verifier predicts support for 98.88\% of answered cases, and the
+gated system improves overall \(F_1\) by only 0.03 points.
+So the long-term goal stays the same, but the immediate plan changes:
+calibration now becomes the next dependency rather than optional supporting
+work, because the current support scores are still too permissive for a strong
+fixed controller.
 
 \paragraph{Next paper-facing extensions.}
-Once Stage 1 is stable, the most natural paper extensions are:
+With Stage 1 and Stage 2 now in place, the most natural paper extensions are:
 \begin{itemize}[leftmargin=1.25em]
-  \item adding support verification,
   \item calibrating confidence against correctness and support,
+  \item making the verifier less permissive on unsupported answers,
   \item testing retrieval noise, and
   \item comparing adaptive balancing against simpler fixed baselines.
 \end{itemize}

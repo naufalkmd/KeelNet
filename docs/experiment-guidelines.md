@@ -142,8 +142,15 @@ Important:
 Important:
 
 - Stage 1 has the completed reference run and report-ready baseline comparison
-- Stage 2 now has an implemented verifier code path and notebook commands, but you still need a real full run with `verifier_eval.json` before calling it done
+- Stage 2 now has a completed reference run with `verifier_eval.json`; the verifier signal is real, but the downstream gain is still small because the current gate is too permissive
 - Stages 3 to 6 already have teammate notebooks and a shared workflow, but their stage-specific code paths still need to be implemented stage by stage
+
+Current reference findings to keep in mind while planning later stages:
+
+- Stage 1 changed unsupported-answer rate from `100.00%` to `27.97%`, but answerable `F1` fell from `84.82` to `66.76`
+- Stage 2 reached support `F1 = 79.79`, but gated overall `F1` moved only from `69.40` to `69.42`
+- a representative Stage 2 false positive is the unanswerable question `What is France a region of?`, where the system still answers `Normandy` and gives it a support score near `1.0`
+- a representative Stage 2 false negative is the answerable question `If input size is equal to n, what can respectively be assumed is the function of n?`, where the system predicts `the time taken` correctly but the verifier suppresses it
 
 ## 2. Start Of A Stage
 
@@ -204,14 +211,15 @@ Before a long run, confirm:
 3. `Run output dir` points to your unique run folder
 4. `CUDA available: True` for full runs
 
-Recommended execution priority after Stage 1:
+Recommended execution priority after Stage 2:
 
-1. finish Stage 2 with a real verifier run and saved `verifier_eval.json`
-2. prioritize Stage 4 next because it directly supports the claim that accuracy-only selection misses unsupported confident answers
-3. use Stage 6 after Stage 4 if you want the strongest novelty claim
-4. use Stage 5 after the controlled proof path when you want a realism check under retrieval noise
+1. do Stage 3 next so QA and verifier scores become calibrated enough for downstream control
+2. do Stage 4 after that so you can test a fixed control rule against the current Stage 2 baseline
+3. decide whether the fixed-control result is already strong enough for the paper
+4. use Stage 6 only after the Stage 4 fixed controller is stable and worth trying to beat
+5. use Stage 5 after the controlled proof path when you want a realism check under retrieval noise
 
-Do not center the project claim on Stage 3 alone or on beating raw answer accuracy by itself.
+Do not center the project claim on Stage 3 alone or on beating raw answer accuracy by itself. Treat Stage 3 as the calibration step that makes Stage 4 and Stage 6 defensible.
 
 ## 3. Editing Loop
 

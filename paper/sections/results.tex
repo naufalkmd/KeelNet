@@ -68,3 +68,73 @@ split.
 The cost is that answer extraction quality remains substantially worse than the
 baseline on answerable questions, which gives a clear target for Stage 2 and
 later stages: preserve the abstention gain while recovering answer quality.
+
+\begin{table}[t]
+  \centering
+  \caption{Stage 2 support verification on top of the Stage 1 abstain-aware QA
+  system, evaluated on the held-out development split at support threshold
+  $0.25$. All values are percentages.}
+  \label{tab:stage2-main-results}
+  \footnotesize
+  \renewcommand{\arraystretch}{1.1}
+  \resizebox{\columnwidth}{!}{%
+    \begin{tabular}{@{}lcccccc@{}}
+      \toprule
+      & \multicolumn{3}{c}{Verifier} & \multicolumn{3}{c}{End-to-end QA} \\
+      \cmidrule(lr){2-4} \cmidrule(l){5-7}
+      System & Prec. & Rec. & F1 & Ans. F1 & Overall F1 & Unsup. Rate \\
+      \midrule
+      Stage 1 abstain QA & -- & -- & -- & 66.76 & 69.40 & 27.97 \\
+      Stage 2 gated QA & 66.62 & 99.43 & 79.79 & 66.41 & 69.42 & 27.57 \\
+      Delta vs.\ Stage 1 & -- & -- & -- & -0.35 & +0.03 & -0.40 \\
+      \bottomrule
+    \end{tabular}%
+  }
+\end{table}
+
+\paragraph{Stage 2 support-verification result.}
+Stage 2 keeps the Stage 1 abstain-aware QA model fixed and adds a verifier over
+question, passage, and predicted answer.
+The selected support threshold is 0.25.
+On the validation split, the verifier reaches 87.71 support $F_1$.
+On the held-out development split, it reaches 79.79 support $F_1$, with a
+66.26\% supported-answer rate and a 33.00\% contradiction rate.
+When that support signal is used to gate the Stage 1 abstain-aware system, the
+end-to-end QA metrics move only slightly: decision-aware overall $F_1$ rises
+from 69.40 to 69.42 and unsupported-answer rate falls from 27.97\% to 27.57\%,
+while answerable $F_1$ slips from 66.76 to 66.41.
+
+\paragraph{How to read the Stage 2 outcome.}
+The positive result is that the verifier does learn a meaningful support signal
+instead of collapsing completely.
+The limiting result is that this signal does not yet translate into a large
+downstream improvement.
+On the dev split, verifier recall is extremely high at 99.43\%, but precision
+is only 66.62\%, and the model predicts support for 98.88\% of answered cases.
+That makes the current gating policy too permissive: the verifier mostly
+confirms answers rather than filtering unsupported ones.
+As a result, Stage 2 should be read as a systems success but not yet as a
+decisive end-to-end win.
+It narrows the next bottleneck clearly: later stages need better calibration
+and control over when support scores are allowed to suppress or permit answers.
+
+\paragraph{Representative failure cases.}
+The saved dev predictions make the current bottleneck concrete.
+On the unanswerable question \emph{``What is France a region of?''}, the Stage 1
+baseline answers \emph{``Normandy''}, the Stage 1 abstain-aware model still
+answers \emph{``Normandy''}, and Stage 2 assigns that answer a support score of
+0.9998 and keeps the final decision as \texttt{answer}.
+This is a clean false-positive support error: the passage contains both
+\emph{France} and \emph{Normandy}, but the relation in the question is reversed
+relative to the evidence.
+By contrast, on the answerable question \emph{``If input size is equal to n,
+what can respectively be assumed is the function of n?''}, the Stage 1
+abstain-aware model correctly predicts \emph{``the time taken''}, but Stage 2
+assigns that answer a support score of only 0.0052 and gates it to
+\abstain.
+This is the complementary false-negative support error:
+the verifier can over-penalize short abstract answers even when the QA model is
+already correct.
+Taken together, these examples match the aggregate metrics:
+the current verifier is strong enough to learn support as a signal, but not yet
+selective enough to improve the final decision reliably.

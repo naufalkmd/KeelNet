@@ -186,3 +186,78 @@ behavior purely through:
 If this works, then later stages can build on a meaningful base mechanism
 instead of introducing extra components before the basic abstention behavior is
 understood.
+
+\subsection{Stage 2 verifier and support gate}
+
+Stage 2 keeps the Stage 1 abstain-aware QA model fixed and adds a second model
+that judges whether a proposed answer is actually supported by the passage.
+This makes the overall system modular rather than jointly end-to-end:
+Stage 1 proposes an answer-or-\abstain\ decision, and Stage 2 decides whether a
+predicted answer should be trusted.
+
+\paragraph{Verification examples.}
+The verifier is trained as a binary classification problem built from the same
+underlying SQuAD~2.0 splits.
+For each answerable training example, the pipeline creates one positive
+verification record using a gold answer and one or more negative records using
+sampled spans from the same passage that do not overlap strongly with the gold
+answer.
+For each unanswerable example, the pipeline creates only negative records by
+sampling unsupported spans from the passage.
+The result is a support-label dataset over tuples
+\((q, p, a)\), where \(q\) is the question, \(p\) is the passage, and \(a\) is
+a candidate answer.
+
+\paragraph{Verifier input and model.}
+The verifier formats the first sequence as a short hypothesis-like query,
+\begin{equation}
+  x^{(1)} = \texttt{Question: } q \; \texttt{\textbackslash n Answer: } a,
+\end{equation}
+and uses the passage as the second sequence,
+\begin{equation}
+  x^{(2)} = p.
+\end{equation}
+These paired sequences are fed into a standard transformer sequence classifier
+initialized from the same \modelname\ checkpoint family as Stage 1, but with a
+two-class support head.
+If \(h_{\mathrm{CLS}}\) is the final pooled representation, the verifier
+computes support logits
+\begin{equation}
+  z = W h_{\mathrm{CLS}} + b,
+\end{equation}
+followed by a softmax that estimates
+\begin{equation}
+  P_{\phi}(\text{supported} \mid q, p, a).
+\end{equation}
+Training uses standard cross-entropy over the binary support labels.
+
+\paragraph{Inference and gating.}
+At evaluation time, only examples that Stage 1 already labeled as
+\texttt{answer} are sent to the verifier.
+If the Stage 1 system abstains, the final decision remains \abstain.
+If Stage 1 answers, Stage 2 attaches a support score
+\(s_{\mathrm{sup}} \in [0, 1]\) and applies a second threshold:
+\begin{equation}
+  \hat{y}_{\mathrm{final}}
+  =
+  \begin{cases}
+    \text{answer}, & \text{if } \hat{y}_{\mathrm{qa}}=\text{answer}
+    \text{ and } s_{\mathrm{sup}} \ge \eta, \\
+    \abstain, & \text{otherwise.}
+  \end{cases}
+\end{equation}
+Here \(\eta\) is a validation-selected support threshold.
+This means the Stage 2 system is a cascaded decision process:
+the QA model first decides whether answering is plausible at all, and the
+verifier then decides whether that proposed answer appears passage-supported.
+
+\paragraph{Threshold search and Stage 2 objective.}
+The support threshold is selected on the validation split by prioritizing
+support \(F_1\), then gated overall \(F_1\), and then lower unsupported-answer
+rate.
+This reflects the Stage 2 question directly:
+not only whether support is learnable, but whether a learned support signal can
+improve the final answer-versus-\abstain\ decision.
+In deep learning terms, Stage 2 tests whether a second learned representation
+space over \((q, p, a)\) can act as a useful post-hoc controller on top of the
+Stage 1 answer space.

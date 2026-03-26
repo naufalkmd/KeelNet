@@ -2,16 +2,20 @@
 \system\ studies a narrower and more operational version of hallucination control:
 evidence-grounded question answering with an explicit answer-or-\abstain\
 decision.
-The current implementation focuses on a Stage 1 setting built on SQuAD~2.0,
-where the model receives a question and a single evidence passage and must
-either return an extractive answer span or abstain when support is insufficient.
-In the current Stage 1 result, an abstain-aware variant reduces unsupported
-answers on the development split from 100.00\% to 27.97\% and improves
-decision-aware overall $F_1$ from 42.35 to 69.40, while answerable $F_1$
-decreases from 84.82 to 66.76.
-These findings support the core claim that explicit abstention supervision can
-substantially improve answer-versus-abstain behavior, but they also show that
-the current model pays a meaningful answer-quality cost for that gain.
-Later stages are designed to extend this core setup with support verification,
-confidence calibration, retrieval, and adaptive constraint balancing.
+The current implementation now reports two stages on SQuAD~2.0 with one
+question and one evidence passage as input.
+Stage 1 compares an answer-only baseline with an abstain-aware variant; the
+abstain-aware model reduces unsupported answers on the development split from
+100.00\% to 27.97\% and improves decision-aware overall $F_1$ from 42.35 to
+69.40, while answerable $F_1$ decreases from 84.82 to 66.76.
+Stage 2 adds a support verifier on top of the Stage 1 abstain-aware system.
+The verifier reaches 79.79 support $F_1$ on the development split at a selected
+support threshold of 0.25, but the resulting gated QA system changes end-to-end
+metrics only marginally: overall $F_1$ moves from 69.40 to 69.42, unsupported
+answer rate from 27.97\% to 27.57\%, and answerable $F_1$ from 66.76 to 66.41.
+These findings support the claim that explicit abstention supervision and
+support verification are both learnable, but they also show that the current
+support-gating policy is too permissive to deliver a large end-to-end gain.
+That result motivates the next stages on calibration, tighter unsupported-answer
+control, retrieval, and adaptive constraint balancing.
 \end{abstract}

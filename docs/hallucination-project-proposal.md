@@ -4,18 +4,59 @@
 
 This document contains both the long-term direction and the current working scope.
 
-The **current decision** after finishing Stage 1 is to keep the same narrow
+The **current decision** after finishing Stage 2 is to keep the same narrow
 evidence-grounded QA framing while moving into the next proof stages in a
 controlled order:
 
 - keep the task as `question + one evidence passage -> short answer or ABSTAIN`
 - keep `SQuAD 2.0` as the controlled setting for the core proof path
 - treat Stage 1 as the proof-of-concept that explicit abstention supervision changes answer-versus-abstain behavior
-- finish Stage 2 next so support verification becomes a real measured signal instead of only a planned signal
-- prioritize Stage 4 after Stage 2 because it directly tests whether accuracy-only model selection hides unsupported confident answers
-- treat Stage 6 as the strongest novelty target if Stage 4 already shows a meaningful fixed-control gain
+- treat Stage 2 as proof that support verification is learnable, but also as evidence that the current gate is still too permissive
+- do Stage 3 next so the QA and verifier scores become trustworthy control signals rather than raw scores
+- prioritize Stage 4 after Stage 3 because it directly tests whether calibrated fixed control can reduce unsupported confident answers
+- treat Stage 6 as the strongest novelty target only after Stage 4 shows a meaningful fixed-control gain
 - keep Stage 5 as the realism extension, not the immediate next proof step
 - keep the external action binary even when later stages add internal support, confidence, or control scores
+
+### Legacy Plan Snapshot
+
+Keep this short legacy note in the proposal so the change in direction stays
+traceable.
+
+The legacy plan after Stage 1 was:
+
+1. finish Stage 2
+2. go straight to Stage 4
+3. use Stage 6 only if Stage 4 looked strong
+4. keep Stage 5 late as the realism check
+
+That older plan treated Stage 3 as supporting work rather than an immediate
+dependency.
+
+### What Stage 2 Actually Changed
+
+Stage 2 did validate the support-verification idea, but it also exposed the new
+main bottleneck.
+
+Observed findings from the completed Stage 2 run:
+
+- support `F1 = 79.79` on the dev split
+- gated overall `F1 = 69.42` versus `69.40` for the Stage 1 abstain-aware base
+- gated unsupported-answer rate `27.57%` versus `27.97%` for the Stage 1 base
+- verifier recall is very high, but the gate is still too permissive to change end-to-end behavior much
+
+Concrete dev-set failures that explain the revision:
+
+- unsupported question: `What is France a region of?`
+  Stage 1 answers `Normandy`, and Stage 2 still gives that answer a support score of about `0.9998`
+- supported question: `If input size is equal to n, what can respectively be assumed is the function of n?`
+  Stage 1 correctly answers `the time taken`, but Stage 2 gives it a support score of about `0.0052` and suppresses it
+
+So the current revision is not a new project idea.
+It is the same project with a clearer diagnosis:
+
+> support is learnable, but calibration and stricter control are now the
+> immediate missing pieces.
 
 ### Stage 1 Decision Snapshot
 
@@ -40,6 +81,11 @@ The working research claim is now:
 > abstention, support verification, and later confidence-aware control should
 > produce a better safety-utility trade-off.
 
+After Stage 2, the active interpretation is more specific:
+
+> support is learnable, but raw support scores are not yet enough; calibration
+> and stricter control are now the critical missing pieces.
+
 This is intentionally narrower than:
 
 > beat standard accuracy metrics
@@ -52,13 +98,15 @@ over-abstention both matter.
 
 Use this order unless the results force a change:
 
-1. `Stage 2`: evidence support verification
-2. `Stage 4`: unsupported-confidence control
-3. `Stage 6`: adaptive constraint balancing, if Stage 4 already works
-4. `Stage 5`: retrieval-grounded realism check after the controlled proof path
+1. `Stage 3`: confidence calibration for QA and verifier signals
+2. `Stage 4`: unsupported-confidence control with fixed rules or penalties
+3. decide whether the fixed-control result is already paper-worthy
+4. `Stage 6`: adaptive constraint balancing, if Stage 4 already works
+5. `Stage 5`: retrieval-grounded realism check after the controlled proof path
 
-`Stage 3` remains useful supporting work, but it should not be the headline
-contribution on its own.
+`Stage 3` remains supporting work rather than the headline contribution, but
+after Stage 2 it becomes the immediate next dependency because the current
+verifier is too permissive to act as a strong downstream filter.
 
 Explicitly out of scope for now:
 
@@ -829,20 +877,23 @@ Add:
 Focus:
 
 - confidence should reflect answer correctness and support strength
+- QA and verifier scores should become usable control variables, not just raw logits
 
 Why now:
 
-- abstention and penalty mechanisms get much cleaner once confidence has meaning
+- Stage 2 showed that support is learnable but the current support gate is too permissive
+- abstention and control mechanisms get much cleaner once QA confidence and support confidence have meaning
 
 Data:
 
-- same Stage 1 or Stage 2 setup
+- same Stage 1 and Stage 2 setup
 - no new dataset is strictly required yet
 
 Model change:
 
 - expose a confidence score for answer / abstain decisions
-- optionally expose confidence for support predictions too
+- expose or recalibrate confidence for support predictions too
+- compare pre-calibration and post-calibration behavior at the downstream gate
 
 Training objective:
 
@@ -854,18 +905,22 @@ Main metrics:
 - `ECE`
 - `Brier Score`
 - relation between confidence and unsupported-answer rate
+- threshold stability for downstream answer / abstain / support control
 
 What this stage proves:
 
 - the model's confidence is not just a raw score, but something that tracks reliability
+- later control decisions can be driven by calibrated signals rather than brittle thresholds
 
 Main failure mode:
 
 - confidence values look smooth but do not actually correlate with correctness or support
+- calibration improves plots without improving downstream decision quality
 
 Stop condition:
 
 - higher confidence generally corresponds to higher support and correctness on the dev set
+- downstream threshold behavior is more stable and easier to justify than with the raw scores
 
 ### Stage 4: Unsupported-Confidence Control
 
@@ -875,11 +930,12 @@ Add:
 
 Focus:
 
-- reduce bluffing without collapsing usefulness
+- reduce bluffing without collapsing usefulness through a fixed, interpretable control rule
 
 Why now:
 
 - this is the first stage where "penalty for unsupported confident claims" is justified rather than guessed
+- after Stage 3, QA and verifier scores should be calibrated enough to support a fixed control baseline
 
 Data:
 
@@ -890,6 +946,7 @@ Model change:
 
 - no major architecture change is required
 - reuse support and confidence signals from earlier stages
+- combine them with an explicit fixed controller or penalty rather than a loose gate
 
 Training objective:
 
@@ -907,6 +964,7 @@ Main metrics:
 What this stage proves:
 
 - the model can be pushed away from confident bluffing without becoming useless
+- a fixed, interpretable controller already beats answer-only or support-only selection
 
 Main failure mode:
 
@@ -915,6 +973,7 @@ Main failure mode:
 Stop condition:
 
 - unsupported confident answers decrease while answer quality remains acceptable
+- the gain is clearly larger than the tiny end-to-end change seen in Stage 2
 
 ### Stage 5: Retrieval-Grounded QA
 
@@ -924,12 +983,13 @@ Change the task to:
 
 Focus:
 
-- realistic evidence access
+- realistic evidence access after the controlled answer/support mechanism is already working
 
 Why late:
 
 - retrieval changes the problem substantially
 - if you add it too early, you will not know whether failures come from answering or from evidence selection
+- Stage 2 already showed that even without retrieval, the main bottleneck is still local decision control
 
 Data:
 
@@ -960,7 +1020,7 @@ Role in the proof chain:
 
 What this stage proves:
 
-- the Stage 1-4 behavior still holds up when evidence is not handed to the model directly
+- the Stage 1-4 or Stage 6 behavior still holds up when evidence is not handed to the model directly
 - the pipeline can distinguish retrieval failure from answer-generation failure well enough to debug honestly
 
 What this stage does not prove:
@@ -990,10 +1050,12 @@ Focus:
 - abstention
 - confidence
 - unsupported-confidence penalties
+- comparison against the best fixed controller from Stage 4
 
 Why last:
 
 - real balancing only makes sense after the underlying signals are already working
+- Stage 6 is only interesting if it clearly beats the best fixed-control baseline
 
 Possible mechanisms:
 
@@ -1039,7 +1101,7 @@ Stop condition:
 
 ### Final Recommendation
 
-For the current project, stop at **Stage 4**.
+For the current project, the minimum convincing path is **Stage 4**.
 
 That is enough to study:
 
@@ -1049,6 +1111,12 @@ That is enough to study:
 - calibrated uncertainty
 - penalty for unsupported confident claims
 
-Do **not** include retrieval in the current stage.
+If Stage 4 is already strong, you can stop there with a cleaner and lower-risk
+paper.
 
-If Stage 4 works, retrieval should become the next project, not just another extra module.
+If you want the stronger novelty path, continue to **Stage 6** before touching
+retrieval.
+
+Do **not** include retrieval in the current proof step.
+
+Retrieval should come after the controlled proof path, not before it.

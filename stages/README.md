@@ -29,16 +29,23 @@ Interpretation:
 
 Current execution priority:
 
+- `03-confidence-calibration`
 - `02-evidence-support-verification`
 - `04-unsupported-confidence-control`
-- `06-adaptive-constraint-balancing`
+- `06-adaptive-constraint-balancing` after a strong fixed-control Stage 4 result
 - `05-retrieval-grounded-qa` after the controlled proof path is stable
 
 Current implementation status:
 
 - Stage `01` has the completed supporting implementation and reference results
-- Stage `02` now has a supporting implementation under `src/keelnet`, but still needs a validated full run before it is considered complete
+- Stage `02` now has the supporting implementation plus a completed reference run, which shows a learnable verifier signal but only a modest end-to-end gain
 - Stages `03` to `06` have teammate notebooks and a shared workflow, but their full stage-specific Python code paths still need to be completed during implementation
+
+Current findings snapshot:
+
+- Stage `01`: strong abstention gain, large answer-quality cost
+- Stage `02`: support is learnable, but the current support gate is too permissive to change end-to-end behavior much
+- next bottleneck: calibration and fixed control, not retrieval yet
 
 Current active stage files:
 

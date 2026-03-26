@@ -9,14 +9,17 @@ This paper takes a deliberately narrow starting point.
 Instead of attempting to solve hallucination in general, we study a controlled
 evidence-grounded question answering task in which a system must either answer
 or abstain.
-The current Stage 1 implementation uses SQuAD~2.0 \citep{rajpurkar2018know}
-with one question and one evidence passage as input, and compares two training
-regimes:
+The current implementation uses SQuAD~2.0 \citep{rajpurkar2018know}
+with one question and one evidence passage as input.
+Stage 1 compares two training regimes:
 \begin{enumerate}[leftmargin=1.25em]
   \item a baseline trained only on answerable examples, and
   \item an abstain-aware variant trained to treat unsupported cases as a
   first-class target behavior.
 \end{enumerate}
+Stage 2 then adds a verifier over question, passage, and predicted answer in
+order to estimate whether an answer is actually supported before it is shown to
+the user.
 
 The central hypothesis is simple:
 explicit abstention supervision should reduce unsupported answers without
@@ -24,6 +27,9 @@ causing an unacceptable collapse in answer quality on answerable questions.
 That hypothesis is narrow enough to evaluate cleanly, but still meaningful as a
 first step toward a broader program on grounded answering, support verification,
 and calibrated uncertainty.
+The next immediate question is whether a learned support signal can recover some
+of the remaining quality-versus-grounding gap without undoing the abstention
+gain from Stage 1.
 
 The intended application setting is also narrow.
 \system\ is most naturally suited to bounded, evidence-grounded QA scenarios in
@@ -39,7 +45,9 @@ appropriate uncertainty \citep{kalai2025why}.
 Our contribution is narrower and more operational:
 rather than explaining hallucination in general, Stage 1 tests whether an
 evidence-grounded QA system can be trained and evaluated so that abstention is
-treated as a useful target behavior instead of a failure by default.
+treated as a useful target behavior instead of a failure by default, and
+Stage 2 tests whether a learned support verifier can improve downstream
+answer-versus-abstain decisions on top of that base system.
 
 This LaTeX scaffold is intentionally written as a living project paper.
 Some sections already reflect stable design decisions, while others are
