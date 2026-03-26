@@ -106,7 +106,8 @@ The official team workflow for Stage 1 is notebook-first:
 3. Edit code locally in VS Code when changes are needed.
 4. Commit and push code changes to GitHub.
 5. Rerun the notebook setup cell so `/content/KeelNet` updates in Colab.
-6. Save experiment artifacts to Google Drive.
+6. Save experiment artifacts to Google Drive, or set `KEELNET_DRIVE_SYNC_DIR`
+   in local-runtime mode to mirror each run there automatically.
 
 The Stage 1 notebook and the Python package expose the current active
 implementation.

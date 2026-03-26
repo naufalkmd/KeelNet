@@ -113,6 +113,10 @@ Use this Drive path:
 
 Share the `KeelNet` folder in your Google Drive with your teammates so they can see the saved artifacts.
 
+If you use Colab connected to a local runtime, you can keep local artifacts as
+the primary run location and also mirror them into a Drive-synced folder by
+setting `KEELNET_DRIVE_SYNC_DIR` before starting Jupyter.
+
 Each stage notebook saves outputs under its own stage-specific folder:
 
 - `DRIVE_PROJECT_DIR / artifacts / stageN_colab / RUN_NAME`
@@ -215,11 +219,12 @@ Recommended execution priority after Stage 2:
 
 1. do Stage 3 next so QA and verifier scores become calibrated enough for downstream control
 2. do Stage 4 after that so you can test a fixed control rule against the current Stage 2 baseline
-3. decide whether the fixed-control result is already strong enough for the paper
-4. use Stage 6 only after the Stage 4 fixed controller is stable and worth trying to beat
-5. use Stage 5 after the controlled proof path when you want a realism check under retrieval noise
+3. use Stage 5 next as the direct support-constrained learning comparison against the strongest modular baseline
+4. decide whether the Stage 4 versus Stage 5 comparison is already strong enough for the paper
+5. use Stage 6 only if adaptive balancing still has a clear chance to beat the strongest earlier baseline
+6. keep retrieval as a later realism extension after the core comparison is stable
 
-Do not center the project claim on Stage 3 alone or on beating raw answer accuracy by itself. Treat Stage 3 as the calibration step that makes Stage 4 and Stage 6 defensible.
+Do not center the project claim on Stage 3 alone or on beating raw answer accuracy by itself. Treat Stage 3 as the calibration step that makes Stage 4 and Stage 5 defensible.
 
 ## 3. Editing Loop
 

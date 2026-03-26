@@ -47,7 +47,7 @@ SETUP_MARKDOWN = (
 
         - hosted Colab defaults: repo `/content/KeelNet`, project folder `/content/drive/MyDrive/KeelNet`
         - local runtime defaults: repo `/content/KeelNet` if present, otherwise your current local checkout; project folder `/content/KeelNet-local`
-        - optional overrides: `KEELNET_REPO_DIR` and `KEELNET_PROJECT_DIR`
+        - optional overrides: `KEELNET_REPO_DIR`, `KEELNET_PROJECT_DIR`, and `KEELNET_DRIVE_SYNC_DIR`
         """
     ).strip()
     + "\n"
@@ -118,6 +118,7 @@ def setup_code(branch: str) -> str:
             f"""
             from pathlib import Path
             import os
+            import shutil
             import subprocess
             import sys
 
@@ -166,6 +167,25 @@ def setup_code(branch: str) -> str:
                 project_dir.mkdir(parents=True, exist_ok=True)
                 print(f"{{PROJECT_STORAGE_LABEL}}: {{project_dir}}")
                 return project_dir
+
+
+            def configure_drive_project_dir(project_storage_dir: Path) -> Path | None:
+                if IS_HOSTED_COLAB:
+                    print(f"Drive project dir: {{project_storage_dir}}")
+                    return project_storage_dir.resolve()
+
+                env_drive_dir = os.environ.get("KEELNET_DRIVE_SYNC_DIR")
+                if not env_drive_dir:
+                    print(
+                        "Drive project dir: disabled "
+                        "(set KEELNET_DRIVE_SYNC_DIR to a local Google Drive sync folder to mirror artifacts there)."
+                    )
+                    return None
+
+                drive_project_dir = Path(env_drive_dir).expanduser().resolve()
+                drive_project_dir.mkdir(parents=True, exist_ok=True)
+                print(f"Drive project dir: {{drive_project_dir}}")
+                return drive_project_dir
 
 
             def configure_hf_token() -> None:
@@ -235,7 +255,7 @@ def setup_code(branch: str) -> str:
 
 
             PROJECT_STORAGE_DIR = configure_project_storage()
-            DRIVE_PROJECT_DIR = PROJECT_STORAGE_DIR
+            DRIVE_PROJECT_DIR = configure_drive_project_dir(PROJECT_STORAGE_DIR)
             configure_hf_token()
             REPO_DIR = ensure_repo().resolve()
             os.chdir(REPO_DIR)
@@ -250,6 +270,33 @@ def setup_code(branch: str) -> str:
             ).stdout.strip()
             print(f"Git branch: {{CURRENT_BRANCH}}")
             run_setup([sys.executable, "-m", "pip", "install", "-q", "-e", str(REPO_DIR)])
+
+
+            def mirror_output_root(output_root: Path) -> Path | None:
+                if DRIVE_PROJECT_DIR is None:
+                    print("Drive artifact mirror is disabled for this runtime.")
+                    return None
+
+                output_root = Path(output_root).expanduser().resolve()
+                if not output_root.exists():
+                    print(f"Nothing to mirror yet: {{output_root}}")
+                    return None
+
+                drive_project_dir = DRIVE_PROJECT_DIR.expanduser().resolve()
+                try:
+                    relative_output = output_root.relative_to(PROJECT_STORAGE_DIR.expanduser().resolve())
+                except ValueError:
+                    relative_output = Path("artifacts") / output_root.name
+                drive_output_root = drive_project_dir / relative_output
+
+                if output_root == drive_output_root:
+                    print(f"Artifacts already stored in Drive: {{output_root}}")
+                    return output_root
+
+                drive_output_root.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(output_root, drive_output_root, dirs_exist_ok=True)
+                print(f"Mirrored artifacts to Drive: {{drive_output_root}}")
+                return drive_output_root
             """
         ).strip()
         + "\n"
@@ -278,7 +325,7 @@ def generic_config_code(
 
             REPO_DIR = Path(REPO_DIR).resolve()
             PROJECT_STORAGE_DIR = Path(PROJECT_STORAGE_DIR).resolve()
-            DRIVE_PROJECT_DIR = PROJECT_STORAGE_DIR
+            DRIVE_PROJECT_DIR = Path(DRIVE_PROJECT_DIR).resolve() if DRIVE_PROJECT_DIR is not None else None
 
             # Change only this for each teammate. The notebook builds the stage name and next version automatically.
             AUTHOR_NAME = "yourname"
@@ -349,6 +396,7 @@ def generic_config_code(
             print(f"Runtime mode: {{RUNTIME_MODE}}")
             print(f"Repo dir: {{REPO_DIR}}")
             print(f"{{PROJECT_STORAGE_LABEL}}: {{PROJECT_STORAGE_DIR}}")
+            print(f"Drive project dir: {{DRIVE_PROJECT_DIR}}")
             print(f"Artifacts root: {{ARTIFACTS_ROOT}}")
             print(f"Run basename: {{RUN_BASENAME}}")
             print(f"Run version: v{{RUN_VERSION}}")
@@ -412,6 +460,8 @@ def generic_save_code() -> str:
     return (
         dedent(
             """
+            mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
+
             if not RUN_NOTES_FILE.exists():
                 metric_lines = [f"- {metric}" for metric in TARGET_METRICS]
                 RUN_NOTES_FILE.write_text(
@@ -478,7 +528,9 @@ def generic_save_code() -> str:
                         "runtime_mode": RUNTIME_MODE,
                         "git_branch": CURRENT_BRANCH,
                         "project_storage_dir": str(PROJECT_STORAGE_DIR),
+                        "drive_project_dir": str(DRIVE_PROJECT_DIR) if DRIVE_PROJECT_DIR is not None else None,
                         "output_root": str(OUTPUT_ROOT),
+                        "mirrored_output_root": str(mirrored_output_root) if mirrored_output_root is not None else None,
                         "target_metrics": TARGET_METRICS,
                         "suggested_modules": SUGGESTED_MODULES,
                     },
@@ -490,6 +542,8 @@ def generic_save_code() -> str:
 
             print(f"Notes template: {RUN_NOTES_FILE}")
             print(f"Run summary: {RUN_SUMMARY_FILE}")
+            if mirrored_output_root is not None:
+                print(f"Drive mirror: {mirrored_output_root}")
             print("Current files under OUTPUT_ROOT:")
             for path in sorted(OUTPUT_ROOT.rglob("*")):
                 print(path)
@@ -505,6 +559,7 @@ def generic_share_code() -> str:
             """
             from datetime import datetime, timezone
 
+            mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
             share_lines = [
                 f"# {STAGE_TITLE} Share Note",
                 "",
@@ -514,6 +569,8 @@ def generic_share_code() -> str:
                 *[f"- {metric}: <fill in after review>" for metric in TARGET_METRICS],
                 f"- Output folder path: {OUTPUT_ROOT}",
             ]
+            if mirrored_output_root is not None:
+                share_lines.append(f"- Drive mirror path: {mirrored_output_root}")
             share_note = "\\n".join(share_lines) + "\\n"
             SHARE_NOTE_FILE = OUTPUT_ROOT / "collab-share-note.md"
             SHARE_NOTE_FILE.write_text(share_note, encoding="utf-8")
@@ -532,6 +589,8 @@ def generic_share_code() -> str:
             print(share_note)
             print(f"Update the metric lines in: {SHARE_NOTE_FILE}")
             print(f"Saved completion marker: {COMPLETION_MARKER_FILE}")
+            if mirrored_output_root is not None:
+                mirror_output_root(OUTPUT_ROOT)
             """
     ).strip()
         + "\n"
@@ -552,7 +611,7 @@ def stage3_config_code() -> str:
 
             REPO_DIR = Path(REPO_DIR).resolve()
             PROJECT_STORAGE_DIR = Path(PROJECT_STORAGE_DIR).resolve()
-            DRIVE_PROJECT_DIR = PROJECT_STORAGE_DIR
+            DRIVE_PROJECT_DIR = Path(DRIVE_PROJECT_DIR).resolve() if DRIVE_PROJECT_DIR is not None else None
 
             # Change only this for each teammate. The notebook builds the stage name and next version automatically.
             AUTHOR_NAME = "naufal"
@@ -719,6 +778,7 @@ def stage3_config_code() -> str:
             print(f"Runtime mode: {RUNTIME_MODE}")
             print(f"Repo dir: {REPO_DIR}")
             print(f"{PROJECT_STORAGE_LABEL}: {PROJECT_STORAGE_DIR}")
+            print(f"Drive project dir: {DRIVE_PROJECT_DIR}")
             print(f"Artifacts root: {ARTIFACTS_ROOT}")
             print(f"Run basename: {RUN_BASENAME}")
             print(f"Run version: v{RUN_VERSION}")
@@ -790,6 +850,8 @@ def stage3_save_code() -> str:
     return (
         dedent(
             """
+            mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
+
             if not RUN_NOTES_FILE.exists():
                 metric_lines = [f"- {metric}" for metric in TARGET_METRICS]
                 RUN_NOTES_FILE.write_text(
@@ -856,6 +918,8 @@ def stage3_save_code() -> str:
                         "runtime_mode": RUNTIME_MODE,
                         "git_branch": CURRENT_BRANCH,
                         "output_root": str(OUTPUT_ROOT),
+                        "drive_project_dir": str(DRIVE_PROJECT_DIR) if DRIVE_PROJECT_DIR is not None else None,
+                        "mirrored_output_root": str(mirrored_output_root) if mirrored_output_root is not None else None,
                         "base_qa_model_dir": str(BASE_QA_MODEL_DIR) if BASE_QA_MODEL_DIR is not None else None,
                         "base_qa_mode": BASE_QA_MODE,
                         "verifier_model_dir": str(VERIFIER_MODEL_DIR) if VERIFIER_MODEL_DIR is not None else None,
@@ -871,6 +935,8 @@ def stage3_save_code() -> str:
 
             print(f"Notes template: {RUN_NOTES_FILE}")
             print(f"Run summary: {RUN_SUMMARY_FILE}")
+            if mirrored_output_root is not None:
+                print(f"Drive mirror: {mirrored_output_root}")
             print("Current files under OUTPUT_ROOT:")
             for path in sorted(OUTPUT_ROOT.rglob("*")):
                 print(path)
@@ -887,6 +953,7 @@ def stage3_share_code() -> str:
             from pathlib import Path
             from datetime import datetime, timezone
 
+            mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
             metric_lines = [f"- {metric}: <fill in after review>" for metric in TARGET_METRICS]
             plot_paths = {}
             if CALIBRATION_EVAL.exists():
@@ -924,6 +991,8 @@ def stage3_share_code() -> str:
                 *metric_lines,
                 f"- Output folder path: {OUTPUT_ROOT}",
             ]
+            if mirrored_output_root is not None:
+                share_lines.append(f"- Drive mirror path: {mirrored_output_root}")
             share_note = "\\n".join(share_lines) + "\\n"
             SHARE_NOTE_FILE = OUTPUT_ROOT / "collab-share-note.md"
             SHARE_NOTE_FILE.write_text(share_note, encoding="utf-8")
@@ -942,6 +1011,8 @@ def stage3_share_code() -> str:
             print(share_note)
             print(f"Saved share note: {SHARE_NOTE_FILE}")
             print(f"Saved completion marker: {COMPLETION_MARKER_FILE}")
+            if mirrored_output_root is not None:
+                mirror_output_root(OUTPUT_ROOT)
 
             if plot_paths:
                 try:
@@ -974,7 +1045,7 @@ def stage4_config_code() -> str:
 
             REPO_DIR = Path(REPO_DIR).resolve()
             PROJECT_STORAGE_DIR = Path(PROJECT_STORAGE_DIR).resolve()
-            DRIVE_PROJECT_DIR = PROJECT_STORAGE_DIR
+            DRIVE_PROJECT_DIR = Path(DRIVE_PROJECT_DIR).resolve() if DRIVE_PROJECT_DIR is not None else None
 
             # Change only this for each teammate. The notebook builds the stage name and next version automatically.
             AUTHOR_NAME = "naufal"
@@ -1153,6 +1224,7 @@ def stage4_config_code() -> str:
             print(f"Runtime mode: {RUNTIME_MODE}")
             print(f"Repo dir: {REPO_DIR}")
             print(f"{PROJECT_STORAGE_LABEL}: {PROJECT_STORAGE_DIR}")
+            print(f"Drive project dir: {DRIVE_PROJECT_DIR}")
             print(f"Artifacts root: {ARTIFACTS_ROOT}")
             print(f"Run basename: {RUN_BASENAME}")
             print(f"Run version: v{RUN_VERSION}")
@@ -1223,6 +1295,8 @@ def stage4_save_code() -> str:
     return (
         dedent(
             """
+            mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
+
             if not RUN_NOTES_FILE.exists():
                 metric_lines = [f"- {metric}" for metric in TARGET_METRICS]
                 RUN_NOTES_FILE.write_text(
@@ -1289,6 +1363,8 @@ def stage4_save_code() -> str:
                         "runtime_mode": RUNTIME_MODE,
                         "git_branch": CURRENT_BRANCH,
                         "output_root": str(OUTPUT_ROOT),
+                        "drive_project_dir": str(DRIVE_PROJECT_DIR) if DRIVE_PROJECT_DIR is not None else None,
+                        "mirrored_output_root": str(mirrored_output_root) if mirrored_output_root is not None else None,
                         "calibration_eval_path": str(CALIBRATION_EVAL_PATH) if CALIBRATION_EVAL_PATH is not None else None,
                         "control_eval": str(CONTROL_EVAL),
                         "target_metrics": TARGET_METRICS,
@@ -1303,6 +1379,8 @@ def stage4_save_code() -> str:
 
             print(f"Notes template: {RUN_NOTES_FILE}")
             print(f"Run summary: {RUN_SUMMARY_FILE}")
+            if mirrored_output_root is not None:
+                print(f"Drive mirror: {mirrored_output_root}")
             print("Current files under OUTPUT_ROOT:")
             for path in sorted(OUTPUT_ROOT.rglob("*")):
                 print(path)
@@ -1318,6 +1396,7 @@ def stage4_share_code() -> str:
             """
             from datetime import datetime, timezone
 
+            mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
             metric_lines = [f"- {metric}: <fill in after review>" for metric in TARGET_METRICS]
             if CONTROL_EVAL.exists():
                 control_results = json.loads(CONTROL_EVAL.read_text(encoding="utf-8"))
@@ -1349,6 +1428,8 @@ def stage4_share_code() -> str:
                 *metric_lines,
                 f"- Output folder path: {OUTPUT_ROOT}",
             ]
+            if mirrored_output_root is not None:
+                share_lines.append(f"- Drive mirror path: {mirrored_output_root}")
             share_note = "\\n".join(share_lines) + "\\n"
             SHARE_NOTE_FILE = OUTPUT_ROOT / "collab-share-note.md"
             SHARE_NOTE_FILE.write_text(share_note, encoding="utf-8")
@@ -1367,6 +1448,8 @@ def stage4_share_code() -> str:
             print(share_note)
             print(f"Saved share note: {SHARE_NOTE_FILE}")
             print(f"Saved completion marker: {COMPLETION_MARKER_FILE}")
+            if mirrored_output_root is not None:
+                mirror_output_root(OUTPUT_ROOT)
             """
         ).strip()
         + "\n"
@@ -1387,7 +1470,7 @@ def stage5_config_code() -> str:
 
             REPO_DIR = Path(REPO_DIR).resolve()
             PROJECT_STORAGE_DIR = Path(PROJECT_STORAGE_DIR).resolve()
-            DRIVE_PROJECT_DIR = PROJECT_STORAGE_DIR
+            DRIVE_PROJECT_DIR = Path(DRIVE_PROJECT_DIR).resolve() if DRIVE_PROJECT_DIR is not None else None
 
             AUTHOR_NAME = "naufal"
             RUN_BASENAME = f"{AUTHOR_NAME}-stage5"
@@ -1598,6 +1681,7 @@ def stage5_config_code() -> str:
             print(f"Runtime mode: {RUNTIME_MODE}")
             print(f"Repo dir: {REPO_DIR}")
             print(f"{PROJECT_STORAGE_LABEL}: {PROJECT_STORAGE_DIR}")
+            print(f"Drive project dir: {DRIVE_PROJECT_DIR}")
             print(f"Artifacts root: {ARTIFACTS_ROOT}")
             print(f"Run basename: {RUN_BASENAME}")
             print(f"Run version: v{RUN_VERSION}")
@@ -1664,6 +1748,8 @@ def stage5_save_code() -> str:
     return (
         dedent(
             """
+            mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
+
             if not RUN_NOTES_FILE.exists():
                 metric_lines = [f"- {metric}" for metric in TARGET_METRICS]
                 RUN_NOTES_FILE.write_text(
@@ -1730,6 +1816,8 @@ def stage5_save_code() -> str:
                         "runtime_mode": RUNTIME_MODE,
                         "git_branch": CURRENT_BRANCH,
                         "output_root": str(OUTPUT_ROOT),
+                        "drive_project_dir": str(DRIVE_PROJECT_DIR) if DRIVE_PROJECT_DIR is not None else None,
+                        "mirrored_output_root": str(mirrored_output_root) if mirrored_output_root is not None else None,
                         "learner_dir": str(LEARNER_DIR),
                         "learner_eval": str(LEARNER_EVAL),
                         "baseline_eval_path": str(MODULAR_BASELINE_EVAL_PATH) if MODULAR_BASELINE_EVAL_PATH is not None else None,
@@ -1745,6 +1833,8 @@ def stage5_save_code() -> str:
 
             print(f"Notes template: {RUN_NOTES_FILE}")
             print(f"Run summary: {RUN_SUMMARY_FILE}")
+            if mirrored_output_root is not None:
+                print(f"Drive mirror: {mirrored_output_root}")
             print("Current files under OUTPUT_ROOT:")
             for path in sorted(OUTPUT_ROOT.rglob("*")):
                 print(path)
@@ -1760,6 +1850,7 @@ def stage5_share_code() -> str:
             """
             from datetime import datetime, timezone
 
+            mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
             metric_lines = [f"- {metric}: <fill in after review>" for metric in TARGET_METRICS]
             if LEARNER_EVAL.exists():
                 learner_results = json.loads(LEARNER_EVAL.read_text(encoding="utf-8"))
@@ -1800,6 +1891,8 @@ def stage5_share_code() -> str:
                 *metric_lines,
                 f"- Output folder path: {OUTPUT_ROOT}",
             ]
+            if mirrored_output_root is not None:
+                share_lines.append(f"- Drive mirror path: {mirrored_output_root}")
             share_note = "\\n".join(share_lines) + "\\n"
             SHARE_NOTE_FILE = OUTPUT_ROOT / "collab-share-note.md"
             SHARE_NOTE_FILE.write_text(share_note, encoding="utf-8")
@@ -1818,6 +1911,8 @@ def stage5_share_code() -> str:
             print(share_note)
             print(f"Saved share note: {SHARE_NOTE_FILE}")
             print(f"Saved completion marker: {COMPLETION_MARKER_FILE}")
+            if mirrored_output_root is not None:
+                mirror_output_root(OUTPUT_ROOT)
             """
         ).strip()
         + "\n"

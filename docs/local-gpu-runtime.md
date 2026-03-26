@@ -152,7 +152,12 @@ If you want different paths, set these before starting Jupyter:
 ```bash
 export KEELNET_REPO_DIR="$(pwd)"
 export KEELNET_PROJECT_DIR="/content/KeelNet-local"
+export KEELNET_DRIVE_SYNC_DIR="/path/to/your/Google Drive/KeelNet"
 ```
+
+`KEELNET_DRIVE_SYNC_DIR` is optional. When set, the notebook save/share cells
+mirror the current stage run folder into that Drive-synced directory while the
+main training and evaluation still run locally.
 
 ## 8. Optional CLI Smoke Test
 
