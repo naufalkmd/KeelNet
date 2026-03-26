@@ -1,7 +1,8 @@
-"""Pure-Python metrics for the Stage 1 and Stage 2 experiments."""
+"""Pure-Python metrics for the Stage 1, Stage 2, and Stage 3 experiments."""
 
 from __future__ import annotations
 
+import math
 import re
 import string
 from collections.abc import Mapping
@@ -67,6 +68,220 @@ def _percentage(numerator: float, denominator: float) -> float:
     return 100.0 * numerator / denominator
 
 
+def _clip_probability(value: float, *, eps: float = 1e-6) -> float:
+    return min(1.0 - eps, max(eps, float(value)))
+
+
+def brier_score(probabilities: list[float], labels: list[float]) -> float:
+    if not probabilities:
+        return 0.0
+    total = 0.0
+    for probability, label in zip(probabilities, labels, strict=False):
+        total += (_clip_probability(probability) - float(label)) ** 2
+    return total / len(probabilities)
+
+
+def build_reliability_bins(
+    probabilities: list[float],
+    labels: list[float],
+    *,
+    num_bins: int = 10,
+) -> list[dict[str, float]]:
+    if num_bins <= 0:
+        raise ValueError("num_bins must be positive.")
+
+    bins: list[dict[str, float]] = []
+    for bin_index in range(num_bins):
+        lower = bin_index / num_bins
+        upper = (bin_index + 1) / num_bins
+        in_bin: list[int] = []
+        for index, probability in enumerate(probabilities):
+            clipped = _clip_probability(probability)
+            if bin_index == num_bins - 1:
+                matches = lower <= clipped <= upper
+            else:
+                matches = lower <= clipped < upper
+            if matches:
+                in_bin.append(index)
+
+        if not in_bin:
+            bins.append(
+                {
+                    "bin_lower": lower,
+                    "bin_upper": upper,
+                    "count": 0.0,
+                    "mean_confidence": 0.0,
+                    "accuracy": 0.0,
+                }
+            )
+            continue
+
+        count = float(len(in_bin))
+        mean_confidence = sum(_clip_probability(probabilities[index]) for index in in_bin) / count
+        accuracy = sum(float(labels[index]) for index in in_bin) / count
+        bins.append(
+            {
+                "bin_lower": lower,
+                "bin_upper": upper,
+                "count": count,
+                "mean_confidence": mean_confidence,
+                "accuracy": accuracy,
+            }
+        )
+
+    return bins
+
+
+def build_adaptive_reliability_bins(
+    probabilities: list[float],
+    labels: list[float],
+    *,
+    num_bins: int = 10,
+) -> list[dict[str, float]]:
+    if num_bins <= 0:
+        raise ValueError("num_bins must be positive.")
+
+    if not probabilities:
+        return []
+
+    clipped_probabilities = [_clip_probability(probability) for probability in probabilities]
+    sorted_pairs = sorted(
+        zip(clipped_probabilities, labels, strict=False),
+        key=lambda item: item[0],
+    )
+    adaptive_bin_count = min(num_bins, len(sorted_pairs))
+    bins: list[dict[str, float]] = []
+    for bin_index in range(adaptive_bin_count):
+        start = (bin_index * len(sorted_pairs)) // adaptive_bin_count
+        end = ((bin_index + 1) * len(sorted_pairs)) // adaptive_bin_count
+        bucket = sorted_pairs[start:end]
+        count = float(len(bucket))
+        mean_confidence = sum(probability for probability, _ in bucket) / count
+        accuracy = sum(float(label) for _, label in bucket) / count
+        bins.append(
+            {
+                "bin_lower": bucket[0][0],
+                "bin_upper": bucket[-1][0],
+                "count": count,
+                "mean_confidence": mean_confidence,
+                "accuracy": accuracy,
+            }
+        )
+
+    return bins
+
+
+def expected_calibration_error(
+    probabilities: list[float],
+    labels: list[float],
+    *,
+    num_bins: int = 10,
+) -> float:
+    if not probabilities:
+        return 0.0
+
+    bins = build_reliability_bins(probabilities, labels, num_bins=num_bins)
+    total_count = float(len(probabilities))
+    error = 0.0
+    for bin_stats in bins:
+        count = bin_stats["count"]
+        if count == 0.0:
+            continue
+        error += (count / total_count) * abs(bin_stats["accuracy"] - bin_stats["mean_confidence"])
+    return error
+
+
+def adaptive_expected_calibration_error(
+    probabilities: list[float],
+    labels: list[float],
+    *,
+    num_bins: int = 10,
+) -> float:
+    if not probabilities:
+        return 0.0
+
+    bins = build_adaptive_reliability_bins(probabilities, labels, num_bins=num_bins)
+    total_count = float(len(probabilities))
+    error = 0.0
+    for bin_stats in bins:
+        count = bin_stats["count"]
+        if count == 0.0:
+            continue
+        error += (count / total_count) * abs(bin_stats["accuracy"] - bin_stats["mean_confidence"])
+    return error
+
+
+def maximum_calibration_error(
+    probabilities: list[float],
+    labels: list[float],
+    *,
+    num_bins: int = 10,
+) -> float:
+    if not probabilities:
+        return 0.0
+
+    bins = build_reliability_bins(probabilities, labels, num_bins=num_bins)
+    return max(
+        (
+            abs(bin_stats["accuracy"] - bin_stats["mean_confidence"])
+            for bin_stats in bins
+            if bin_stats["count"] > 0.0
+        ),
+        default=0.0,
+    )
+
+
+def pearson_correlation(probabilities: list[float], labels: list[float]) -> float:
+    if not probabilities:
+        return 0.0
+
+    count = float(len(probabilities))
+    mean_probability = sum(_clip_probability(probability) for probability in probabilities) / count
+    mean_label = sum(float(label) for label in labels) / count
+
+    numerator = 0.0
+    probability_variance = 0.0
+    label_variance = 0.0
+    for probability, label in zip(probabilities, labels, strict=False):
+        centered_probability = _clip_probability(probability) - mean_probability
+        centered_label = float(label) - mean_label
+        numerator += centered_probability * centered_label
+        probability_variance += centered_probability**2
+        label_variance += centered_label**2
+
+    if probability_variance == 0.0 or label_variance == 0.0:
+        return 0.0
+    return numerator / math.sqrt(probability_variance * label_variance)
+
+
+def threshold_calibration_gap(
+    probabilities: list[float],
+    labels: list[float],
+    *,
+    thresholds: list[float] | None = None,
+    min_count: int = 25,
+) -> float:
+    if not probabilities:
+        return 0.0
+
+    if thresholds is None:
+        thresholds = [index / 20.0 for index in range(10, 20)]
+
+    gaps: list[float] = []
+    for threshold in thresholds:
+        selected_labels = [
+            float(label)
+            for probability, label in zip(probabilities, labels, strict=False)
+            if _clip_probability(probability) >= threshold
+        ]
+        if len(selected_labels) < min_count:
+            continue
+        empirical_accuracy = sum(selected_labels) / len(selected_labels)
+        gaps.append(abs(empirical_accuracy - float(threshold)))
+
+    if not gaps:
+        return 0.0
+    return sum(gaps) / len(gaps)
 def is_supported_answer(
     answer_text: str,
     gold_answers: list[str],
