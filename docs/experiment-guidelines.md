@@ -32,7 +32,7 @@ Before the first notebook run, do the key and Hugging Face setup in this order:
 
 Also read:
 
-- [`stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`](../stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb)
+- [`stages/01-grounded-abstention-baseline/notebooks/stage-01-grounded-abstention-baseline-colab.ipynb`](../stages/01-grounded-abstention-baseline/notebooks/stage-01-grounded-abstention-baseline-colab.ipynb)
 - [`stages/01-grounded-abstention-baseline/results-template.md`](../stages/01-grounded-abstention-baseline/results-template.md)
 
 ## 1. Prerequisites
@@ -172,7 +172,7 @@ Open the stage notebook in browser Google Colab like this:
 3. choose `naufalkmd/KeelNet`
 4. switch to the branch you want to run
 5. open the stage notebook you want
-6. example: `stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`
+6. example: `stages/01-grounded-abstention-baseline/notebooks/stage-01-grounded-abstention-baseline-colab.ipynb`
 7. make sure the runtime uses GPU
 8. do not run the setup cell yet if `HF_TOKEN` is not in Colab Secrets
 

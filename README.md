@@ -54,7 +54,7 @@ establish a controlled first result that later stages can extend.
 
 Use these files as the main entry points into the project:
 
-- `stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`
+- `stages/01-grounded-abstention-baseline/notebooks/stage-01-grounded-abstention-baseline-colab.ipynb`
   - official Stage 1 execution notebook
 - `docs/experiment-guidelines.md`
   - teammate setup, Colab workflow, and experiment loop
@@ -118,7 +118,7 @@ For local commands, the package entry points are:
 If you are onboarding a teammate, start with:
 
 - `docs/experiment-guidelines.md`
-- `stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`
+- `stages/01-grounded-abstention-baseline/notebooks/stage-01-grounded-abstention-baseline-colab.ipynb`
 
 ## References
 

@@ -6,7 +6,8 @@ Keep each stage folder minimal.
 
 Default rule:
 
-- keep exactly one teammate-facing notebook template per stage at `notebooks/google-colab.ipynb`
+- keep exactly one teammate-facing notebook template per stage at
+  `notebooks/stage-XX-<stage-name>-colab.ipynb`
 - add result files only when they are actually used
 - keep experiment artifacts in Google Drive, not inside the repo
 
@@ -50,9 +51,18 @@ Current findings snapshot:
 Current active stage files:
 
 - `results-template.md`
-- `notebooks/google-colab.ipynb`
+- `notebooks/stage-XX-<stage-name>-colab.ipynb`
 
-Other stages now also include a `notebooks/google-colab.ipynb` template so teammates can start each stage from the same Colab workflow.
+Examples:
+
+- `notebooks/stage-01-grounded-abstention-baseline-colab.ipynb`
+- `notebooks/stage-02-evidence-support-verification-colab.ipynb`
+- `notebooks/stage-02-5-hard-negative-support-verification-colab.ipynb`
+
+Use the stage-specific `stage-XX-...-colab.ipynb` files as the canonical
+notebook names for each stage.
+For follow-up variants, keep the same pattern and insert the substage number,
+for example `stage-02-5-...-colab.ipynb`.
 
 Shared note template:
 

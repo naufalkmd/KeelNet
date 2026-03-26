@@ -961,7 +961,7 @@ def stage3_share_code() -> str:
 
 
 STAGE_2 = {
-    "path": REPO_ROOT / "stages/02-evidence-support-verification/notebooks/google-colab.ipynb",
+    "path": REPO_ROOT / "stages/02-evidence-support-verification/notebooks/stage-02-evidence-support-verification-colab.ipynb",
     "stage_number": 2,
     "stage_label": "Stage 2: Evidence Support Verification",
     "config_markdown": (
@@ -1053,7 +1053,7 @@ STAGE_2 = {
 
 GENERIC_STAGES = [
     {
-        "path": REPO_ROOT / "stages/03-confidence-calibration/notebooks/google-colab.ipynb",
+        "path": REPO_ROOT / "stages/03-confidence-calibration/notebooks/stage-03-confidence-calibration-colab.ipynb",
         "branch": "stage/03-confidence-calibration",
         "stage_number": 3,
         "stage_label": "Stage 3: Confidence Calibration",
@@ -1155,7 +1155,7 @@ GENERIC_STAGES = [
         "share_code": stage3_share_code(),
     },
     {
-        "path": REPO_ROOT / "stages/04-unsupported-confidence-control/notebooks/google-colab.ipynb",
+        "path": REPO_ROOT / "stages/04-unsupported-confidence-control/notebooks/stage-04-unsupported-confidence-control-colab.ipynb",
         "branch": "stage/04-unsupported-confidence-control",
         "stage_number": 4,
         "stage_label": "Stage 4: Unsupported-Confidence Control",
@@ -1253,7 +1253,7 @@ GENERIC_STAGES = [
         ),
     },
     {
-        "path": REPO_ROOT / "stages/05-retrieval-grounded-qa/notebooks/google-colab.ipynb",
+        "path": REPO_ROOT / "stages/05-retrieval-grounded-qa/notebooks/stage-05-retrieval-grounded-qa-colab.ipynb",
         "branch": "stage/05-retrieval-grounded-qa",
         "stage_number": 5,
         "stage_label": "Stage 5: Retrieval-Grounded QA",
@@ -1352,7 +1352,7 @@ GENERIC_STAGES = [
         ),
     },
     {
-        "path": REPO_ROOT / "stages/06-adaptive-constraint-balancing/notebooks/google-colab.ipynb",
+        "path": REPO_ROOT / "stages/06-adaptive-constraint-balancing/notebooks/stage-06-adaptive-constraint-balancing-colab.ipynb",
         "branch": "stage/06-adaptive-constraint-balancing",
         "stage_number": 6,
         "stage_label": "Stage 6: Adaptive Constraint Balancing",

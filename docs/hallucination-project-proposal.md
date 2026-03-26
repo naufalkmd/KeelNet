@@ -70,7 +70,7 @@ Use this as the active project rule:
 
 The concrete execution plan for this stage is in:
 
-- `stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`
+- `stages/01-grounded-abstention-baseline/notebooks/stage-01-grounded-abstention-baseline-colab.ipynb`
 
 ### Current Claim Direction
 

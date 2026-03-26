@@ -139,7 +139,7 @@ local GPU if PyTorch sees CUDA.
 
 Open:
 
-- `stages/01-grounded-abstention-baseline/notebooks/google-colab.ipynb`
+- `stages/01-grounded-abstention-baseline/notebooks/stage-01-grounded-abstention-baseline-colab.ipynb`
 
 Then run the notebook setup cell. In local-runtime mode it should:
 
