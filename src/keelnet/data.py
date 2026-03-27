@@ -8,12 +8,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
-
-<<<<<<< HEAD
 from keelnet.metrics import f1_score, is_supported_answer, metric_max_over_ground_truths, normalize_answer
-=======
-from keelnet.metrics import f1_score, is_supported_answer, metric_max_over_ground_truths, normalize_answer
->>>>>>> 371d661 (Implement Stage 5 support-constrained learner)
 
 _WORD_PATTERN = re.compile(r"\b\w+(?:[-']\w+)*\b")
 
