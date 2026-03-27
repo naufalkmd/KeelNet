@@ -3504,6 +3504,389 @@ STAGE_2 = {
 }
 
 
+def stage8_config_code() -> str:
+    return (
+        dedent(
+            """
+            from pathlib import Path
+            import json
+            import re
+            import subprocess
+            import sys
+
+            import torch
+
+            REPO_DIR = Path(REPO_DIR).resolve()
+            PROJECT_STORAGE_DIR = Path(PROJECT_STORAGE_DIR).resolve()
+            DRIVE_PROJECT_DIR = Path(DRIVE_PROJECT_DIR).resolve() if DRIVE_PROJECT_DIR is not None else None
+
+            AUTHOR_NAME = "naufal"
+            RUN_BASENAME = f"{AUTHOR_NAME}-stage8"
+            ARTIFACTS_ROOT = PROJECT_STORAGE_DIR / "artifacts" / "stage8_colab"
+            COMPLETION_MARKER_NAME = "RUN_COMPLETED.txt"
+
+            STAGE_TITLE = "Stage 8: Hybrid Stage 5 Plus Calibrated Control"
+            STAGE_OBJECTIVE = "Freeze Stage 5 as the answer engine, rescore its candidates with the calibrated verifier from Stage 4, and train a lightweight final controller on top."
+            TARGET_METRICS = [
+                "overall F1",
+                "answerable F1",
+                "unsupported-answer rate",
+                "supported-answer rate",
+                "answer rate",
+                "comparison against Stage 4 and Stage 5",
+            ]
+            IMPLEMENTATION_HINTS = [
+                "input: frozen Stage 5 candidate answers plus the Stage 4 control artifact",
+                "output: a lightweight hybrid controller with a hard calibrated support shield",
+                "success means a better answer-quality versus groundedness balance than raw Stage 5",
+            ]
+            SUGGESTED_MODULES = ["keelnet.hybrid", "keelnet.learn", "keelnet.control", "keelnet.verify", "keelnet.metrics"]
+
+
+            def completed_versions(root: Path, run_basename: str) -> list[int]:
+                versions: list[int] = []
+                if not root.exists():
+                    return versions
+
+                pattern = re.compile(rf"^{re.escape(run_basename)}-v(\\d+)$")
+                for child in root.iterdir():
+                    if not child.is_dir():
+                        continue
+                    match = pattern.match(child.name)
+                    if match and (child / COMPLETION_MARKER_NAME).exists():
+                        versions.append(int(match.group(1)))
+                return sorted(versions)
+
+
+            def completed_run_dirs(root: Path, *, run_prefix: str | None = None) -> list[Path]:
+                if not root.exists():
+                    return []
+
+                pattern = re.compile(rf"^{re.escape(run_prefix)}-v(\\d+)$") if run_prefix is not None else None
+                runs: list[Path] = []
+                for child in root.iterdir():
+                    if not child.is_dir():
+                        continue
+                    if not (child / COMPLETION_MARKER_NAME).exists():
+                        continue
+                    if pattern is not None and not pattern.match(child.name):
+                        continue
+                    runs.append(child)
+                return sorted(runs, key=lambda path: (path.stat().st_mtime, path.name))
+
+
+            def default_upstream_path(stage_folder: str, relative_path: str, *, preferred_run_prefix: str | None = None) -> str | None:
+                stage_root = PROJECT_STORAGE_DIR / "artifacts" / stage_folder
+                ordered_runs: list[Path] = []
+
+                if preferred_run_prefix is not None:
+                    ordered_runs.extend(reversed(completed_run_dirs(stage_root, run_prefix=preferred_run_prefix)))
+
+                for run_dir in reversed(completed_run_dirs(stage_root)):
+                    if run_dir not in ordered_runs:
+                        ordered_runs.append(run_dir)
+
+                relative = Path(relative_path)
+                for run_dir in ordered_runs:
+                    candidate = run_dir / relative
+                    if candidate.exists():
+                        return str(candidate)
+                return None
+
+
+            RUN_VERSION = max(completed_versions(ARTIFACTS_ROOT, RUN_BASENAME), default=0) + 1
+            RUN_NAME = f"{RUN_BASENAME}-v{RUN_VERSION}"
+            OUTPUT_ROOT = ARTIFACTS_ROOT / RUN_NAME
+            OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+            RUN_MARKER_FILE = OUTPUT_ROOT / "RUN_STARTED.txt"
+            RUN_NOTES_FILE = OUTPUT_ROOT / "run-notes-template.md"
+            RUN_SUMMARY_FILE = OUTPUT_ROOT / "run-summary.json"
+            COMPLETION_MARKER_FILE = OUTPUT_ROOT / COMPLETION_MARKER_NAME
+
+            __NOTEBOOK_ARCHIVE_CONFIG_CODE__
+
+            DEFAULT_STAGE5_MODEL_DIR = default_upstream_path(
+                "stage5_colab",
+                "learner",
+                preferred_run_prefix=f"{AUTHOR_NAME}-stage5",
+            )
+            DEFAULT_STAGE5_EVAL = default_upstream_path(
+                "stage5_colab",
+                "learner_eval.json",
+                preferred_run_prefix=f"{AUTHOR_NAME}-stage5",
+            )
+            DEFAULT_STAGE4_CONTROL_EVAL = default_upstream_path(
+                "stage4_colab",
+                "control_eval.json",
+                preferred_run_prefix=f"{AUTHOR_NAME}-stage4",
+            )
+            STAGE5_MODEL_DIR = DEFAULT_STAGE5_MODEL_DIR
+            CONTROL_EVAL_PATH = DEFAULT_STAGE4_CONTROL_EVAL
+            COMPARISON_BASELINE_EVAL_PATH = DEFAULT_STAGE4_CONTROL_EVAL or DEFAULT_STAGE5_EVAL
+
+            TRAIN_BATCH_SIZE = 64
+            EVAL_BATCH_SIZE = 16
+            CONTROLLER_EPOCHS = 10
+            CONTROLLER_LR = 1e-3
+            CONTROLLER_WEIGHT_DECAY = 0.01
+            HIDDEN_SIZE = 32
+            DROPOUT = 0.10
+            POSITIVE_WEIGHT = 1.0
+            NEGATIVE_WEIGHT = 2.0
+            HARD_NEGATIVE_WEIGHT = 1.5
+            MAX_CANDIDATES_PER_EXAMPLE = 6
+            MAX_CANDIDATES_PER_FEATURE = 3
+            MAX_UNSUPPORTED_ANSWER_RATE = 20.0
+            CANDIDATE_THRESHOLD_MIN = 0.05
+            CANDIDATE_THRESHOLD_MAX = 0.95
+            CANDIDATE_THRESHOLD_STEP = 0.05
+            MAX_TRAIN_SAMPLES = None
+            MAX_EVAL_SAMPLES = None
+
+            RUN_SMOKE_TEST = False
+            SMOKE_TEST_TRAIN_SAMPLES = 256
+            SMOKE_TEST_EVAL_SAMPLES = 128
+            SMOKE_TEST_EPOCHS = 2
+
+            HYBRID_DIR = OUTPUT_ROOT / "hybrid-controller"
+            HYBRID_EVAL = OUTPUT_ROOT / "hybrid_eval.json"
+
+            if STAGE5_MODEL_DIR is not None:
+                STAGE5_MODEL_DIR = Path(STAGE5_MODEL_DIR).expanduser().resolve()
+                if not STAGE5_MODEL_DIR.exists():
+                    raise FileNotFoundError(f"Stage 5 model directory not found: {STAGE5_MODEL_DIR}")
+
+            if CONTROL_EVAL_PATH is not None:
+                CONTROL_EVAL_PATH = Path(CONTROL_EVAL_PATH).expanduser().resolve()
+                if not CONTROL_EVAL_PATH.exists():
+                    raise FileNotFoundError(f"Stage 4 control eval not found: {CONTROL_EVAL_PATH}")
+
+            if COMPARISON_BASELINE_EVAL_PATH is not None:
+                COMPARISON_BASELINE_EVAL_PATH = Path(COMPARISON_BASELINE_EVAL_PATH).expanduser().resolve()
+                if not COMPARISON_BASELINE_EVAL_PATH.exists():
+                    raise FileNotFoundError(f"Comparison baseline eval not found: {COMPARISON_BASELINE_EVAL_PATH}")
+
+
+            def run(cmd):
+                rendered = [str(part) for part in cmd]
+                print("$", " ".join(rendered))
+                with subprocess.Popen(
+                    rendered,
+                    cwd=REPO_DIR,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    bufsize=1,
+                ) as process:
+                    if process.stdout is not None:
+                        for line in process.stdout:
+                            print(line, end="", flush=True)
+                    return_code = process.wait()
+                if return_code != 0:
+                    raise subprocess.CalledProcessError(return_code, rendered)
+
+
+            def run_many(commands, *, label: str) -> bool:
+                if not commands:
+                    print(f"No commands configured for {label} yet.")
+                    return False
+
+                for index, cmd in enumerate(commands, start=1):
+                    print(f"\\n[{label} {index}/{len(commands)}]")
+                    run(cmd)
+                return True
+
+
+            def maybe_add_arg(cmd: list[str], flag: str, value) -> None:
+                if value is None:
+                    return
+                cmd.extend([flag, str(value)])
+
+
+            def build_train_command(
+                stage5_model_dir: Path,
+                control_eval_path: Path,
+                output_dir: Path,
+                *,
+                max_train_samples: int | None,
+                max_eval_samples: int | None,
+                num_train_epochs: int,
+            ) -> list[str]:
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "keelnet.hybrid",
+                    "train",
+                    "--stage5-model-path",
+                    str(stage5_model_dir),
+                    "--control-path",
+                    str(control_eval_path),
+                    "--output-dir",
+                    str(output_dir),
+                    "--train-batch-size",
+                    str(TRAIN_BATCH_SIZE),
+                    "--eval-batch-size",
+                    str(EVAL_BATCH_SIZE),
+                    "--learning-rate",
+                    str(CONTROLLER_LR),
+                    "--weight-decay",
+                    str(CONTROLLER_WEIGHT_DECAY),
+                    "--num-train-epochs",
+                    str(num_train_epochs),
+                    "--hidden-size",
+                    str(HIDDEN_SIZE),
+                    "--dropout",
+                    str(DROPOUT),
+                    "--positive-weight",
+                    str(POSITIVE_WEIGHT),
+                    "--negative-weight",
+                    str(NEGATIVE_WEIGHT),
+                    "--hard-negative-weight",
+                    str(HARD_NEGATIVE_WEIGHT),
+                    "--max-candidates-per-example",
+                    str(MAX_CANDIDATES_PER_EXAMPLE),
+                    "--max-candidates-per-feature",
+                    str(MAX_CANDIDATES_PER_FEATURE),
+                    "--max-unsupported-answer-rate",
+                    str(MAX_UNSUPPORTED_ANSWER_RATE),
+                ]
+                maybe_add_arg(cmd, "--max-train-samples", max_train_samples)
+                maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                return cmd
+
+
+            def build_eval_command(
+                model_dir: Path,
+                stage5_model_dir: Path,
+                control_eval_path: Path,
+                output_path: Path,
+                *,
+                max_train_samples: int | None,
+                max_eval_samples: int | None,
+            ) -> list[str]:
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "keelnet.hybrid",
+                    "evaluate",
+                    "--model-path",
+                    str(model_dir),
+                    "--stage5-model-path",
+                    str(stage5_model_dir),
+                    "--control-path",
+                    str(control_eval_path),
+                    "--output-path",
+                    str(output_path),
+                    "--eval-batch-size",
+                    str(EVAL_BATCH_SIZE),
+                    "--candidate-threshold-min",
+                    str(CANDIDATE_THRESHOLD_MIN),
+                    "--candidate-threshold-max",
+                    str(CANDIDATE_THRESHOLD_MAX),
+                    "--candidate-threshold-step",
+                    str(CANDIDATE_THRESHOLD_STEP),
+                    "--max-unsupported-answer-rate",
+                    str(MAX_UNSUPPORTED_ANSWER_RATE),
+                ]
+                maybe_add_arg(cmd, "--max-train-samples", max_train_samples)
+                maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                return cmd
+
+
+            if STAGE5_MODEL_DIR is None or CONTROL_EVAL_PATH is None:
+                SMOKE_TEST_COMMANDS = []
+                STAGE_COMMANDS = []
+            else:
+                smoke_model_dir = OUTPUT_ROOT / "smoke-hybrid-controller"
+                smoke_eval_path = OUTPUT_ROOT / "smoke-hybrid-eval.json"
+                smoke_train_command = build_train_command(
+                    STAGE5_MODEL_DIR,
+                    CONTROL_EVAL_PATH,
+                    smoke_model_dir,
+                    max_train_samples=SMOKE_TEST_TRAIN_SAMPLES,
+                    max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
+                    num_train_epochs=SMOKE_TEST_EPOCHS,
+                )
+                smoke_eval_command = build_eval_command(
+                    smoke_model_dir,
+                    STAGE5_MODEL_DIR,
+                    CONTROL_EVAL_PATH,
+                    smoke_eval_path,
+                    max_train_samples=SMOKE_TEST_TRAIN_SAMPLES,
+                    max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
+                )
+                stage_train_command = build_train_command(
+                    STAGE5_MODEL_DIR,
+                    CONTROL_EVAL_PATH,
+                    HYBRID_DIR,
+                    max_train_samples=MAX_TRAIN_SAMPLES,
+                    max_eval_samples=MAX_EVAL_SAMPLES,
+                    num_train_epochs=CONTROLLER_EPOCHS,
+                )
+                stage_eval_command = build_eval_command(
+                    HYBRID_DIR,
+                    STAGE5_MODEL_DIR,
+                    CONTROL_EVAL_PATH,
+                    HYBRID_EVAL,
+                    max_train_samples=MAX_TRAIN_SAMPLES,
+                    max_eval_samples=MAX_EVAL_SAMPLES,
+                )
+                SMOKE_TEST_COMMANDS = [smoke_train_command, smoke_eval_command]
+                STAGE_COMMANDS = [stage_train_command, stage_eval_command]
+
+            RUN_MARKER_FILE.write_text(
+                "\\n".join(
+                    [
+                        f"stage={STAGE_TITLE}",
+                        f"run_name={RUN_NAME}",
+                        f"run_version=v{RUN_VERSION}",
+                        f"runtime_mode={RUNTIME_MODE}",
+                        f"repo_dir={REPO_DIR}",
+                        f"project_storage_dir={PROJECT_STORAGE_DIR}",
+                        f"git_branch={CURRENT_BRANCH}",
+                        f"stage5_model_dir={STAGE5_MODEL_DIR}",
+                        f"control_eval_path={CONTROL_EVAL_PATH}",
+                        f"comparison_baseline_eval_path={COMPARISON_BASELINE_EVAL_PATH}",
+                        "status=configured",
+                        "note=This file is created when the config cell runs.",
+                    ]
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+
+            print(f"Runtime mode: {RUNTIME_MODE}")
+            print(f"Repo dir: {REPO_DIR}")
+            print(f"{PROJECT_STORAGE_LABEL}: {PROJECT_STORAGE_DIR}")
+            print(f"Drive project dir: {DRIVE_PROJECT_DIR}")
+            print(f"Artifacts root: {ARTIFACTS_ROOT}")
+            print(f"Run basename: {RUN_BASENAME}")
+            print(f"Run version: v{RUN_VERSION}")
+            print(f"Run output dir: {OUTPUT_ROOT}")
+            print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
+            print(f"Run marker file: {RUN_MARKER_FILE}")
+            print(f"Stage 5 model dir: {STAGE5_MODEL_DIR}")
+            print(f"Stage 4 control eval path: {CONTROL_EVAL_PATH}")
+            print(f"Comparison baseline eval path: {COMPARISON_BASELINE_EVAL_PATH}")
+            print(f"Planned hybrid controller dir: {HYBRID_DIR}")
+            print(f"Planned hybrid eval file: {HYBRID_EVAL}")
+            print(f"Max unsupported-answer rate: {MAX_UNSUPPORTED_ANSWER_RATE}")
+            print(f"CUDA available: {torch.cuda.is_available()}")
+            if torch.cuda.is_available():
+                print(f"GPU: {torch.cuda.get_device_name(0)}")
+            print("Target metrics:", ", ".join(TARGET_METRICS))
+            print("Suggested modules:", ", ".join(SUGGESTED_MODULES))
+
+            if STAGE5_MODEL_DIR is None:
+                print("Set STAGE5_MODEL_DIR before running Stage 8.")
+            if CONTROL_EVAL_PATH is None:
+                print("Set CONTROL_EVAL_PATH before running Stage 8.")
+            """
+        ).replace("__NOTEBOOK_ARCHIVE_CONFIG_CODE__", NOTEBOOK_ARCHIVE_CONFIG_CODE.rstrip()).strip()
+        + "\n"
+    )
+
+
 GENERIC_STAGES = [
     {
         "path": REPO_ROOT / "stages/03-confidence-calibration/notebooks/stage-03-confidence-calibration-colab.ipynb",
@@ -4115,7 +4498,1059 @@ GENERIC_STAGES = [
         "config_code": stage7_config_code(),
         "save_code": stage7_save_code(),
     },
+    {
+        "path": REPO_ROOT / "stages/08-joint-optimization/notebooks/stage-08-joint-optimization-colab.ipynb",
+        "branch": "main",
+        "stage_number": 8,
+        "stage_label": "Stage 8: Hybrid Stage 5 Plus Calibrated Control",
+        "objective": "Use Stage 5 as the answer engine, then add a calibrated Stage 4-style safety controller on top to recover a better grounded trade-off.",
+        "metrics": [
+            "overall F1",
+            "answerable F1",
+            "unsupported-answer rate",
+            "supported-answer rate",
+            "answer rate",
+            "comparison against Stage 4 and Stage 5",
+        ],
+        "hints": [
+            "input: frozen Stage 5 candidate answers plus the Stage 4 calibrated control artifact",
+            "output: a lightweight hybrid controller with a hard calibrated support shield",
+            "success means a better answer-quality versus groundedness balance than raw Stage 5",
+        ],
+        "modules": ["keelnet.hybrid", "keelnet.learn", "keelnet.control", "keelnet.verify", "keelnet.metrics"],
+        "template_path": DEFAULT_GENERIC_NOTEBOOK_TEMPLATE,
+        "notes_markdown": (
+            dedent(
+                """
+                ## Stage Notes
+
+                ### Goal
+
+                Treat Stage 5 as the strong answer proposer, then let a calibrated safety controller decide whether that answer is grounded enough to keep.
+
+                ### Scope
+
+                - input: frozen Stage 5 candidate answers plus the Stage 4 calibrated control artifact
+                - output: answer or `ABSTAIN`
+                - comparison: raw Stage 5 learner versus hybrid Stage 5 plus control
+
+                ### Main Change
+
+                - keep Stage 5 fixed for answer capability
+                - add a lightweight control layer trained on top of Stage 5 candidate features
+                - keep a hard calibrated support shield at inference
+
+                ### Main Metrics
+
+                - overall `F1`
+                - answerable `F1`
+                - unsupported-answer rate
+                - supported-answer rate
+                - answer rate
+                - abstain `F1`
+
+                ### What This Stage Validates
+
+                - the best current learner benefits from a modular safety layer instead of replacing it
+                - calibrated support information still adds value when Stage 5 already proposes strong answers
+                - the hybrid path is a better practical frontier than raw direct learning alone
+
+                ### Handoff Condition
+
+                Do not call Stage 8 successful unless it clearly improves the Stage 5 trade-off without collapsing into Stage 4-style over-conservatism.
+                """
+            ).strip()
+            + "\n"
+        ),
+        "config_markdown": (
+            dedent(
+                """
+                <h2 style="color: #1d4ed8;">2. Configure The Run</h2>
+
+                Set `AUTHOR_NAME` to your name. This notebook builds the stage-specific `RUN_NAME` automatically as `yourname-stage8-v1`, `yourname-stage8-v2`, `yourname-stage8-v3`, and so on based on completed runs.
+
+                This notebook tries to auto-fill `STAGE5_MODEL_DIR` from the latest completed Stage 5 run and `CONTROL_EVAL_PATH` from the latest completed Stage 4 run under the current artifact root. It also tries to auto-fill `COMPARISON_BASELINE_EVAL_PATH` from Stage 4 first, then Stage 5.
+
+                The config cell prepares the upstream paths and default Stage 8 train/evaluate commands automatically. Review the printed paths, thresholds, and command lists before launching a full Colab run.
+                """
+            ).strip()
+            + "\n"
+        ),
+        "smoke_markdown": (
+            dedent(
+                """
+                <h2 style="color: #1d4ed8;">4. Optional Smoke Test</h2>
+
+                Use this section to run a small Stage 8 train/evaluate cycle before the full run. Keep it short so you can catch path, dependency, or runtime issues before spending a full hosted-Colab session.
+                """
+            ).strip()
+            + "\n"
+        ),
+        "implementation_banner": implementation_banner(
+            8,
+            "run the new <code>keelnet.hybrid</code> path to freeze Stage 5, rescore its candidates with the calibrated verifier from Stage 4, and train a lightweight final safety controller.",
+            "the hybrid system beats raw Stage 5 on grounded trade-off quality and stays competitive with the strongest modular baseline.",
+            "retraining Stage 5 end to end again, renaming Stage 5 thresholds as a new method, broad hallucination claims.",
+        ),
+        "implementation_markdown": (
+            dedent(
+                """
+                ## IMPLEMENTATION 1: Train And Evaluate The Stage 8 Hybrid Controller
+
+                This is the main Stage 8 run section. The default commands now use the real hybrid path, which combines:
+
+                - a frozen Stage 5 answer engine
+                - candidate rescoring with the calibrated Stage 4 verifier
+                - a lightweight final keep/abstain controller
+                - a hard calibrated support shield at inference
+
+                Use the smoke test first if you want a quick wiring check, then run the full train and evaluate commands here.
+                """
+            ).strip()
+            + "\n"
+        ),
+        "save_markdown": (
+            dedent(
+                """
+                <h2 style="color: #15803d;">Save Notes And Review Artifacts</h2>
+
+                This cell creates teammate-friendly note files inside the current run folder and lists the current artifacts. Update the generated notes as you learn what does and does not work in Stage 8: Hybrid Stage 5 Plus Calibrated Control.
+                """
+            ).strip()
+            + "\n"
+        ),
+        "final_markdown": (
+            dedent(
+                """
+                <h2 style="color: #15803d;">Final Check</h2>
+
+                Stage 8 only matters if the hybrid actually combines the strengths of both paths.
+
+                Check all four:
+
+                - Stage 5 answer quality remains meaningfully strong
+                - unsupported answers go down compared with raw Stage 5
+                - the gain is not just over-abstention or a tiny threshold trick
+                - the hybrid frontier is easier to defend than either path alone
+
+                If those are not true yet, Stage 8 is still a design sketch instead of a convincing wrap-up stage.
+                """
+            ).strip()
+            + "\n"
+        ),
+        "share_markdown": (
+            dedent(
+                """
+                <h2 style="color: #15803d;">Share This Run</h2>
+
+                This cell prints a minimal share-ready summary for teammates, saves it into the current run folder, and marks the run as completed so the next run becomes the next version.
+
+                Use it to capture whether the hybrid is actually stronger than raw Stage 5 and whether the safety shield is doing useful work.
+                """
+            ).strip()
+            + "\n"
+        ),
+        "config_code": stage8_config_code(),
+    },
 ]
+
+
+FINAL_COMPARISON_NOTEBOOK = {
+    "path": REPO_ROOT / "analysis/notebooks/final-comparison-colab.ipynb",
+    "branch": "main",
+}
+
+FINAL_COMPARISON_NOTES_MARKDOWN = (
+    dedent(
+        """
+        ## Comparison Notes
+
+        Use this notebook after meaningful stage runs already exist in the artifact store.
+
+        ### Goal
+
+        Build one trustworthy comparison across the strongest completed runs without turning this into another method stage.
+
+        ### What This Notebook Should Produce
+
+        - one comparison table across Stage 1 baseline, Stage 1 abstain, Stage 4, Stage 5, Stage 6, Stage 7, and Stage 8 when artifacts exist
+        - paper-ready figures saved into the run folder
+        - a short written takeaway that says which trade-off looks strongest and which stages are still missing
+
+        ### Interpretation Rules
+
+        - do not overclaim from missing rows
+        - prefer trade-off plots over single-metric winners
+        - treat unsupported-answer rate as a primary constraint, not a side metric
+        """
+    ).strip()
+    + "\n"
+)
+
+FINAL_COMPARISON_CONFIG_MARKDOWN = (
+    dedent(
+        """
+        <h2 style="color: #1d4ed8;">2. Configure The Comparison Run</h2>
+
+        Set `AUTHOR_NAME` to your name if you want the notebook to prefer your own completed runs first.
+
+        This notebook auto-finds the latest completed artifact for:
+
+        - Stage 1 baseline and abstain
+        - Stage 4 fixed control
+        - Stage 5 support-constrained learner
+        - Stage 6 adaptive balancer
+        - Stage 7 risk-budgeted action learner
+        - Stage 8 hybrid Stage 5 plus calibrated control
+
+        You can override any discovered path directly in the config cell before building the comparison.
+        """
+    ).strip()
+    + "\n"
+)
+
+FINAL_COMPARISON_DISCOVERY_MARKDOWN = (
+    dedent(
+        """
+        <h2 style="color: #1d4ed8;">4. Discover And Build The Comparison</h2>
+
+        Run this section after you review the printed artifact paths. It loads each available eval file, normalizes the metrics into one table, and saves comparison figures into the current run folder.
+        """
+    ).strip()
+    + "\n"
+)
+
+FINAL_COMPARISON_IMPLEMENTATION_BANNER = (
+    dedent(
+        """
+        <div style="border-left: 6px solid #c2410c; background: #fff7ed; padding: 12px 16px; border-radius: 8px;">
+        <strong>Comparison Starts Here</strong><br/>
+        Sections 1-4 prepare the runtime and artifact paths. This section turns the completed stage artifacts into one comparison table and graph set.
+        <ul>
+          <li><strong>Start here:</strong> confirm the auto-filled eval paths, then run the comparison cell below.</li>
+          <li><strong>Finish here:</strong> you have a saved metrics table, saved figures, and a short textual takeaway under the comparison run folder.</li>
+          <li><strong>Out of scope:</strong> retraining models, silently changing earlier metrics, or inventing missing stage results.</li>
+        </ul>
+        </div>
+        """
+    ).strip()
+    + "\n"
+)
+
+FINAL_COMPARISON_IMPLEMENTATION_MARKDOWN = (
+    dedent(
+        """
+        ## IMPLEMENTATION 1: Load Stage Evals And Generate Comparison Figures
+
+        This is the main comparison section. It does four things:
+
+        1. load each available stage eval JSON
+        2. normalize the metrics into one table
+        3. save comparison figures into `FIGURES_DIR`
+        4. save a machine-readable comparison summary into `OUTPUT_ROOT`
+
+        Missing artifact paths are handled gracefully and reported in the notebook output.
+        """
+    ).strip()
+    + "\n"
+)
+
+FINAL_COMPARISON_NOTE_TEMPLATE_MARKDOWN = (
+    dedent(
+        """
+        ## Comparison Note Template
+
+        Update the notes for the final analysis rather than a single training run.
+
+        Use this structure:
+
+        - Coverage
+        - Missing stages or missing artifacts
+        - Strongest result by overall F1
+        - Strongest result under the unsupported-answer constraint
+        - Best trade-off plot to cite in the paper
+        - Main takeaway
+        - Next paper edits
+        """
+    ).strip()
+    + "\n"
+)
+
+FINAL_COMPARISON_SAVE_MARKDOWN = (
+    dedent(
+        """
+        <h2 style="color: #15803d;">Save Notes And Review Comparison Artifacts</h2>
+
+        This cell saves the comparison table, figure list, and a note template for the final write-up. Use it after the comparison cell succeeds.
+        """
+    ).strip()
+    + "\n"
+)
+
+FINAL_COMPARISON_FINAL_MARKDOWN = (
+    dedent(
+        """
+        <h2 style="color: #15803d;">Final Check</h2>
+
+        A useful wrap-up comparison is not just a pretty graph.
+
+        Check all four:
+
+        - the rows come from real saved artifacts, not manual copying
+        - the stage labels match the eval files they came from
+        - the graphs reflect the same metrics the paper discusses
+        - the takeaway is honest about missing stages or failed runs
+        """
+    ).strip()
+    + "\n"
+)
+
+FINAL_COMPARISON_SHARE_MARKDOWN = (
+    dedent(
+        """
+        <h2 style="color: #15803d;">Share This Comparison</h2>
+
+        This cell saves a small share note and marks the comparison run as completed. Use it after you review the figures and decide which ones belong in the paper or slides.
+        """
+    ).strip()
+    + "\n"
+)
+
+
+def final_comparison_intro_markdown() -> str:
+    return (
+        dedent(
+            """
+            # KeelNet Final Comparison Template
+
+            Use this notebook after the method stages are done to compare the strongest completed artifacts in one place.
+
+            Recommended flow:
+
+            1. run setup and validation
+            2. confirm the discovered eval paths
+            3. generate the comparison table and figures
+            4. save the summary artifacts for the paper
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def final_comparison_config_code() -> str:
+    return (
+        dedent(
+            """
+            from pathlib import Path
+            import json
+            import re
+            import subprocess
+            import sys
+
+            import torch
+
+            REPO_DIR = Path(REPO_DIR).resolve()
+            PROJECT_STORAGE_DIR = Path(PROJECT_STORAGE_DIR).resolve()
+            DRIVE_PROJECT_DIR = Path(DRIVE_PROJECT_DIR).resolve() if DRIVE_PROJECT_DIR is not None else None
+
+            AUTHOR_NAME = "naufal"
+            RUN_BASENAME = f"{AUTHOR_NAME}-final-comparison"
+            ARTIFACTS_ROOT = PROJECT_STORAGE_DIR / "artifacts" / "final_comparison_colab"
+            COMPLETION_MARKER_NAME = "RUN_COMPLETED.txt"
+
+            NOTEBOOK_TITLE = "KeelNet Final Comparison"
+            NOTEBOOK_OBJECTIVE = "Aggregate the strongest completed stage artifacts into one comparison table and one reusable figure set."
+            TARGET_METRICS = [
+                "overall F1",
+                "answerable F1",
+                "unsupported-answer rate",
+                "abstain F1",
+                "answer rate",
+                "supported-answer rate",
+            ]
+            SUGGESTED_FIGURES = [
+                "overall F1 vs unsupported-answer rate",
+                "answerable F1 vs unsupported-answer rate",
+                "summary bar chart across key metrics",
+                "answer rate vs supported-answer rate for support-aware stages",
+            ]
+
+
+            def completed_versions(root: Path, run_basename: str) -> list[int]:
+                versions: list[int] = []
+                if not root.exists():
+                    return versions
+
+                pattern = re.compile(rf"^{re.escape(run_basename)}-v(\\d+)$")
+                for child in root.iterdir():
+                    if not child.is_dir():
+                        continue
+                    match = pattern.match(child.name)
+                    if match and (child / COMPLETION_MARKER_NAME).exists():
+                        versions.append(int(match.group(1)))
+                return sorted(versions)
+
+
+            def completed_run_dirs(root: Path, *, run_prefix: str | None = None) -> list[Path]:
+                if not root.exists():
+                    return []
+
+                pattern = re.compile(rf"^{re.escape(run_prefix)}-v(\\d+)$") if run_prefix is not None else None
+                runs: list[Path] = []
+                for child in root.iterdir():
+                    if not child.is_dir():
+                        continue
+                    if not (child / COMPLETION_MARKER_NAME).exists():
+                        continue
+                    if pattern is not None and not pattern.match(child.name):
+                        continue
+                    runs.append(child)
+                return sorted(runs, key=lambda path: (path.stat().st_mtime, path.name))
+
+
+            def default_upstream_path(stage_folder: str, relative_path: str, *, preferred_run_prefix: str | None = None) -> str | None:
+                stage_root = PROJECT_STORAGE_DIR / "artifacts" / stage_folder
+                ordered_runs: list[Path] = []
+
+                if preferred_run_prefix is not None:
+                    ordered_runs.extend(reversed(completed_run_dirs(stage_root, run_prefix=preferred_run_prefix)))
+
+                for run_dir in reversed(completed_run_dirs(stage_root)):
+                    if run_dir not in ordered_runs:
+                        ordered_runs.append(run_dir)
+
+                relative = Path(relative_path)
+                for run_dir in ordered_runs:
+                    candidate = run_dir / relative
+                    if candidate.exists():
+                        return str(candidate)
+                return None
+
+
+            def normalize_optional_path(value: str | Path | None) -> Path | None:
+                if value is None:
+                    return None
+                candidate = Path(value).expanduser().resolve()
+                if not candidate.exists():
+                    print(f"Missing artifact path: {candidate}")
+                    return None
+                return candidate
+
+
+            RUN_VERSION = max(completed_versions(ARTIFACTS_ROOT, RUN_BASENAME), default=0) + 1
+            RUN_NAME = f"{RUN_BASENAME}-v{RUN_VERSION}"
+            OUTPUT_ROOT = ARTIFACTS_ROOT / RUN_NAME
+            OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+            RUN_MARKER_FILE = OUTPUT_ROOT / "RUN_STARTED.txt"
+            RUN_NOTES_FILE = OUTPUT_ROOT / "run-notes-template.md"
+            RUN_SUMMARY_FILE = OUTPUT_ROOT / "run-summary.json"
+            COMPLETION_MARKER_FILE = OUTPUT_ROOT / COMPLETION_MARKER_NAME
+            FIGURES_DIR = OUTPUT_ROOT / "figures"
+            FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+            COMPARISON_TABLE_CSV = OUTPUT_ROOT / "comparison_metrics.csv"
+            COMPARISON_TABLE_JSON = OUTPUT_ROOT / "comparison_metrics.json"
+            COMPARISON_SUMMARY_JSON = OUTPUT_ROOT / "comparison_summary.json"
+
+            __NOTEBOOK_ARCHIVE_CONFIG_CODE__
+
+            STAGE1_BASELINE_EVAL_PATH = normalize_optional_path(
+                default_upstream_path("stage1_colab", "baseline_eval.json", preferred_run_prefix=f"{AUTHOR_NAME}-stage1")
+            )
+            STAGE1_ABSTAIN_EVAL_PATH = normalize_optional_path(
+                default_upstream_path("stage1_colab", "abstain_eval.json", preferred_run_prefix=f"{AUTHOR_NAME}-stage1")
+            )
+            STAGE4_CONTROL_EVAL_PATH = normalize_optional_path(
+                default_upstream_path("stage4_colab", "control_eval.json", preferred_run_prefix=f"{AUTHOR_NAME}-stage4")
+            )
+            STAGE5_LEARNER_EVAL_PATH = normalize_optional_path(
+                default_upstream_path("stage5_colab", "learner_eval.json", preferred_run_prefix=f"{AUTHOR_NAME}-stage5")
+            )
+            STAGE6_BALANCE_EVAL_PATH = normalize_optional_path(
+                default_upstream_path("stage6_colab", "balance_eval.json", preferred_run_prefix=f"{AUTHOR_NAME}-stage6")
+            )
+            STAGE7_ACTION_EVAL_PATH = normalize_optional_path(
+                default_upstream_path("stage7_colab", "risk_action_eval.json", preferred_run_prefix=f"{AUTHOR_NAME}-stage7")
+            )
+            STAGE8_HYBRID_EVAL_PATH = normalize_optional_path(
+                default_upstream_path("stage8_colab", "hybrid_eval.json", preferred_run_prefix=f"{AUTHOR_NAME}-stage8")
+            )
+
+            COMPARISON_STAGE_SPECS = [
+                {
+                    "label": "Stage 1 Baseline",
+                    "family": "stage1",
+                    "eval_path": STAGE1_BASELINE_EVAL_PATH,
+                },
+                {
+                    "label": "Stage 1 Abstain",
+                    "family": "stage1",
+                    "eval_path": STAGE1_ABSTAIN_EVAL_PATH,
+                },
+                {
+                    "label": "Stage 4 Fixed Control",
+                    "family": "stage4",
+                    "eval_path": STAGE4_CONTROL_EVAL_PATH,
+                },
+                {
+                    "label": "Stage 5 Learner",
+                    "family": "stage5",
+                    "eval_path": STAGE5_LEARNER_EVAL_PATH,
+                },
+                {
+                    "label": "Stage 6 Adaptive Balance",
+                    "family": "stage6",
+                    "eval_path": STAGE6_BALANCE_EVAL_PATH,
+                },
+                {
+                    "label": "Stage 7 Action Learner",
+                    "family": "stage7",
+                    "eval_path": STAGE7_ACTION_EVAL_PATH,
+                },
+                {
+                    "label": "Stage 8 Hybrid Control",
+                    "family": "stage8",
+                    "eval_path": STAGE8_HYBRID_EVAL_PATH,
+                },
+            ]
+
+            AVAILABLE_STAGE_LABELS = [
+                spec["label"]
+                for spec in COMPARISON_STAGE_SPECS
+                if spec["eval_path"] is not None
+            ]
+            MISSING_STAGE_LABELS = [
+                spec["label"]
+                for spec in COMPARISON_STAGE_SPECS
+                if spec["eval_path"] is None
+            ]
+
+            RUN_MARKER_FILE.write_text(
+                "\\n".join(
+                    [
+                        f"notebook={NOTEBOOK_TITLE}",
+                        f"run_name={RUN_NAME}",
+                        f"run_version=v{RUN_VERSION}",
+                        f"runtime_mode={RUNTIME_MODE}",
+                        f"repo_dir={REPO_DIR}",
+                        f"project_storage_dir={PROJECT_STORAGE_DIR}",
+                        f"git_branch={CURRENT_BRANCH}",
+                        f"stage1_baseline_eval_path={STAGE1_BASELINE_EVAL_PATH}",
+                        f"stage1_abstain_eval_path={STAGE1_ABSTAIN_EVAL_PATH}",
+                        f"stage4_control_eval_path={STAGE4_CONTROL_EVAL_PATH}",
+                        f"stage5_learner_eval_path={STAGE5_LEARNER_EVAL_PATH}",
+                        f"stage6_balance_eval_path={STAGE6_BALANCE_EVAL_PATH}",
+                        f"stage7_action_eval_path={STAGE7_ACTION_EVAL_PATH}",
+                        f"stage8_hybrid_eval_path={STAGE8_HYBRID_EVAL_PATH}",
+                        "status=configured",
+                    ]
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+
+            print(f"Runtime mode: {RUNTIME_MODE}")
+            print(f"Repo dir: {REPO_DIR}")
+            print(f"{PROJECT_STORAGE_LABEL}: {PROJECT_STORAGE_DIR}")
+            print(f"Drive project dir: {DRIVE_PROJECT_DIR}")
+            print(f"Artifacts root: {ARTIFACTS_ROOT}")
+            print(f"Run basename: {RUN_BASENAME}")
+            print(f"Run version: v{RUN_VERSION}")
+            print(f"Run output dir: {OUTPUT_ROOT}")
+            print(f"Figures dir: {FIGURES_DIR}")
+            print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
+            print(f"Run marker file: {RUN_MARKER_FILE}")
+            print(f"CUDA available: {torch.cuda.is_available()}")
+            if torch.cuda.is_available():
+                print(f"GPU: {torch.cuda.get_device_name(0)}")
+            print("Target metrics:", ", ".join(TARGET_METRICS))
+            print("Suggested figures:", ", ".join(SUGGESTED_FIGURES))
+            print("")
+            print("Discovered eval paths:")
+            for spec in COMPARISON_STAGE_SPECS:
+                print(f"- {spec['label']}: {spec['eval_path']}")
+            print("")
+            print("Available rows:", ", ".join(AVAILABLE_STAGE_LABELS) if AVAILABLE_STAGE_LABELS else "none")
+            print("Missing rows:", ", ".join(MISSING_STAGE_LABELS) if MISSING_STAGE_LABELS else "none")
+
+
+            def run(cmd):
+                rendered = [str(part) for part in cmd]
+                print("$", " ".join(rendered))
+                with subprocess.Popen(
+                    rendered,
+                    cwd=REPO_DIR,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    bufsize=1,
+                ) as process:
+                    if process.stdout is not None:
+                        for line in process.stdout:
+                            print(line, end="", flush=True)
+                    return_code = process.wait()
+                if return_code != 0:
+                    raise subprocess.CalledProcessError(return_code, rendered)
+            """
+        ).replace("__NOTEBOOK_ARCHIVE_CONFIG_CODE__", NOTEBOOK_ARCHIVE_CONFIG_CODE.rstrip()).strip()
+        + "\n"
+    )
+
+
+def final_comparison_implementation_code() -> str:
+    return (
+        dedent(
+            """
+            import json
+            from pathlib import Path
+
+            import matplotlib.pyplot as plt
+            import pandas as pd
+
+            try:
+                plt.style.use("seaborn-v0_8-whitegrid")
+            except OSError:
+                pass
+
+
+            def load_eval_payload(path: Path) -> dict:
+                return json.loads(path.read_text(encoding="utf-8"))
+
+
+            def _stage1_answer_rate(payload: dict, metrics: dict) -> float | None:
+                predictions = payload.get("dev_predictions")
+                if isinstance(predictions, dict) and predictions:
+                    total = len(predictions)
+                    answered = sum(
+                        1
+                        for prediction in predictions.values()
+                        if str(prediction.get("decision", "abstain")).lower() == "answer"
+                    )
+                    return 100.0 * answered / total if total > 0 else None
+
+                total = float(metrics.get("answerable_count", 0.0)) + float(metrics.get("unanswerable_count", 0.0))
+                return None if total <= 0 else 100.0 - float(metrics.get("abstain_recall", 0.0))
+
+
+            def extract_comparison_row(spec: dict, payload: dict) -> dict:
+                family = spec["family"]
+
+                if family == "stage1":
+                    metrics = payload.get("dev_metrics", {}) or {}
+                    mix = {
+                        "answer_rate": _stage1_answer_rate(payload, metrics),
+                        "supported_answer_rate": None,
+                        "unsupported_among_answers_rate": None,
+                    }
+                    selected_operating_point = payload.get("selected_threshold")
+                elif family == "stage4":
+                    metrics = payload.get("control_dev_metrics", {}) or {}
+                    mix = payload.get("control_dev_mix", {}) or {}
+                    selected_operating_point = payload.get("selected_config")
+                elif family == "stage5":
+                    metrics = payload.get("dev_metrics", {}) or {}
+                    mix = payload.get("dev_mix", {}) or {}
+                    selected_operating_point = payload.get("selected_keep_threshold")
+                elif family == "stage6":
+                    metrics = payload.get("dev_metrics", {}) or {}
+                    mix = payload.get("dev_mix", {}) or {}
+                    selected_operating_point = payload.get("selected_threshold")
+                elif family == "stage7":
+                    metrics = payload.get("dev_metrics", {}) or {}
+                    mix = payload.get("dev_mix", {}) or {}
+                    overabstain = payload.get("dev_overabstain", {}) or {}
+                    selected_operating_point = payload.get("selected_risk_threshold")
+                elif family == "stage8":
+                    metrics = payload.get("dev_metrics", {}) or {}
+                    mix = payload.get("dev_mix", {}) or {}
+                    selected_operating_point = payload.get("selected_candidate_threshold")
+                else:
+                    raise ValueError(f"Unsupported comparison family: {family}")
+
+                row = {
+                    "label": spec["label"],
+                    "family": family,
+                    "source_path": str(spec["eval_path"]),
+                    "selected_operating_point": selected_operating_point,
+                    "overall_f1": metrics.get("overall_f1"),
+                    "answerable_f1": metrics.get("answerable_f1"),
+                    "unsupported_answer_rate": metrics.get("unsupported_answer_rate"),
+                    "abstain_f1": metrics.get("abstain_f1"),
+                    "answer_rate": mix.get("answer_rate"),
+                    "supported_answer_rate": mix.get("supported_answer_rate"),
+                    "unsupported_among_answers_rate": mix.get("unsupported_among_answers_rate"),
+                    "max_unsupported_answer_rate": payload.get("max_unsupported_answer_rate"),
+                }
+                if family == "stage7":
+                    row["overabstain_rate"] = overabstain.get("overabstain_rate")
+                    row["max_overabstain_rate"] = payload.get("max_overabstain_rate")
+                else:
+                    row["overabstain_rate"] = None
+                    row["max_overabstain_rate"] = None
+                return row
+
+
+            comparison_records = []
+            missing_specs = []
+            for spec in COMPARISON_STAGE_SPECS:
+                eval_path = spec["eval_path"]
+                if eval_path is None:
+                    missing_specs.append(spec)
+                    continue
+                payload = load_eval_payload(eval_path)
+                comparison_records.append(extract_comparison_row(spec, payload))
+
+            comparison_df = pd.DataFrame(comparison_records)
+            if comparison_df.empty:
+                raise RuntimeError(
+                    "No comparison rows were loaded. Confirm that at least one completed stage eval file exists."
+                )
+
+            stage_order = [spec["label"] for spec in COMPARISON_STAGE_SPECS]
+            comparison_df["label"] = pd.Categorical(comparison_df["label"], categories=stage_order, ordered=True)
+            comparison_df = comparison_df.sort_values("label").reset_index(drop=True)
+
+            rounded_columns = [
+                "overall_f1",
+                "answerable_f1",
+                "unsupported_answer_rate",
+                "abstain_f1",
+                "answer_rate",
+                "supported_answer_rate",
+                "unsupported_among_answers_rate",
+                "overabstain_rate",
+            ]
+            display_df = comparison_df.copy()
+            for column in rounded_columns:
+                if column in display_df:
+                    display_df[column] = display_df[column].map(lambda value: round(float(value), 2) if pd.notna(value) else value)
+
+            print("Loaded comparison rows:")
+            print(", ".join(str(label) for label in comparison_df["label"].tolist()))
+            if missing_specs:
+                print("Missing rows:")
+                for spec in missing_specs:
+                    print(f"- {spec['label']}")
+            display(display_df)
+
+            COMPARISON_TABLE_CSV.write_text(display_df.to_csv(index=False), encoding="utf-8")
+            COMPARISON_TABLE_JSON.write_text(json.dumps(comparison_records, indent=2) + "\\n", encoding="utf-8")
+
+            colors = {
+                "stage1": "#475569",
+                "stage4": "#0284c7",
+                "stage5": "#dc2626",
+                "stage6": "#7c3aed",
+                "stage7": "#059669",
+                "stage8": "#ea580c",
+            }
+
+
+            def _annotate_points(ax, frame: pd.DataFrame, *, x: str, y: str) -> None:
+                for _, row in frame.iterrows():
+                    if pd.isna(row[x]) or pd.isna(row[y]):
+                        continue
+                    ax.annotate(
+                        str(row["label"]),
+                        (row[x], row[y]),
+                        textcoords="offset points",
+                        xytext=(5, 5),
+                        fontsize=9,
+                    )
+
+
+            overall_vs_unsupported_path = FIGURES_DIR / "overall-f1-vs-unsupported-answer-rate.png"
+            answerable_vs_unsupported_path = FIGURES_DIR / "answerable-f1-vs-unsupported-answer-rate.png"
+            summary_bar_path = FIGURES_DIR / "summary-metrics-bar-chart.png"
+            support_mix_path = FIGURES_DIR / "answer-rate-vs-supported-answer-rate.png"
+
+            scatter_df = comparison_df.dropna(subset=["overall_f1", "unsupported_answer_rate"]).copy()
+            fig, ax = plt.subplots(figsize=(9, 6))
+            ax.scatter(
+                scatter_df["unsupported_answer_rate"],
+                scatter_df["overall_f1"],
+                s=80,
+                c=[colors.get(family, "#111827") for family in scatter_df["family"]],
+            )
+            _annotate_points(ax, scatter_df, x="unsupported_answer_rate", y="overall_f1")
+            ax.set_title("Overall F1 vs Unsupported-Answer Rate")
+            ax.set_xlabel("Unsupported-Answer Rate (%)")
+            ax.set_ylabel("Overall F1")
+            ax.axvline(20.0, color="#ef4444", linestyle="--", linewidth=1.2, label="20% budget")
+            ax.legend(loc="best")
+            fig.tight_layout()
+            fig.savefig(overall_vs_unsupported_path, dpi=200, bbox_inches="tight")
+            plt.close(fig)
+
+            scatter_df = comparison_df.dropna(subset=["answerable_f1", "unsupported_answer_rate"]).copy()
+            fig, ax = plt.subplots(figsize=(9, 6))
+            ax.scatter(
+                scatter_df["unsupported_answer_rate"],
+                scatter_df["answerable_f1"],
+                s=80,
+                c=[colors.get(family, "#111827") for family in scatter_df["family"]],
+            )
+            _annotate_points(ax, scatter_df, x="unsupported_answer_rate", y="answerable_f1")
+            ax.set_title("Answerable F1 vs Unsupported-Answer Rate")
+            ax.set_xlabel("Unsupported-Answer Rate (%)")
+            ax.set_ylabel("Answerable F1")
+            ax.axvline(20.0, color="#ef4444", linestyle="--", linewidth=1.2, label="20% budget")
+            ax.legend(loc="best")
+            fig.tight_layout()
+            fig.savefig(answerable_vs_unsupported_path, dpi=200, bbox_inches="tight")
+            plt.close(fig)
+
+            bar_metrics = ["overall_f1", "answerable_f1", "unsupported_answer_rate", "abstain_f1"]
+            fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+            for axis, metric in zip(axes.flat, bar_metrics, strict=False):
+                metric_df = comparison_df.dropna(subset=[metric]).copy()
+                axis.bar(
+                    metric_df["label"].astype(str),
+                    metric_df[metric],
+                    color=[colors.get(family, "#111827") for family in metric_df["family"]],
+                )
+                axis.set_title(metric.replace("_", " ").title())
+                axis.tick_params(axis="x", rotation=30)
+                if metric == "unsupported_answer_rate":
+                    axis.axhline(20.0, color="#ef4444", linestyle="--", linewidth=1.2)
+            fig.tight_layout()
+            fig.savefig(summary_bar_path, dpi=200, bbox_inches="tight")
+            plt.close(fig)
+
+            support_df = comparison_df.dropna(subset=["answer_rate", "supported_answer_rate"]).copy()
+            if not support_df.empty:
+                fig, ax = plt.subplots(figsize=(9, 6))
+                ax.scatter(
+                    support_df["answer_rate"],
+                    support_df["supported_answer_rate"],
+                    s=80,
+                    c=[colors.get(family, "#111827") for family in support_df["family"]],
+                )
+                _annotate_points(ax, support_df, x="answer_rate", y="supported_answer_rate")
+                ax.set_title("Answer Rate vs Supported-Answer Rate")
+                ax.set_xlabel("Answer Rate (%)")
+                ax.set_ylabel("Supported-Answer Rate (%)")
+                fig.tight_layout()
+                fig.savefig(support_mix_path, dpi=200, bbox_inches="tight")
+                plt.close(fig)
+            else:
+                support_mix_path = None
+                print("Support-aware mix plot skipped because no loaded rows expose answer-rate and supported-answer-rate together.")
+
+            available_figure_paths = [
+                overall_vs_unsupported_path,
+                answerable_vs_unsupported_path,
+                summary_bar_path,
+            ]
+            if support_mix_path is not None:
+                available_figure_paths.append(support_mix_path)
+
+            best_overall_row = comparison_df.loc[comparison_df["overall_f1"].astype(float).idxmax()].to_dict()
+            safest_row = comparison_df.loc[comparison_df["unsupported_answer_rate"].astype(float).idxmin()].to_dict()
+            constrained_df = comparison_df[
+                comparison_df["unsupported_answer_rate"].notna()
+                & (comparison_df["unsupported_answer_rate"] <= 20.0)
+            ].copy()
+            best_under_budget_row = None
+            if not constrained_df.empty:
+                best_under_budget_row = constrained_df.loc[constrained_df["overall_f1"].astype(float).idxmax()].to_dict()
+
+            comparison_summary = {
+                "available_rows": [str(label) for label in comparison_df["label"].tolist()],
+                "missing_rows": [spec["label"] for spec in missing_specs],
+                "best_overall_f1_row": best_overall_row,
+                "lowest_unsupported_answer_rate_row": safest_row,
+                "best_overall_f1_under_20pct_budget": best_under_budget_row,
+                "figure_paths": [str(path) for path in available_figure_paths],
+            }
+            COMPARISON_SUMMARY_JSON.write_text(json.dumps(comparison_summary, indent=2) + "\\n", encoding="utf-8")
+
+            print("")
+            print(f"Saved comparison table: {COMPARISON_TABLE_CSV}")
+            print(f"Saved comparison records: {COMPARISON_TABLE_JSON}")
+            print(f"Saved comparison summary: {COMPARISON_SUMMARY_JSON}")
+            print("Saved figures:")
+            for figure_path in available_figure_paths:
+                print(f"- {figure_path}")
+            print("")
+            print("Best overall F1 row:", best_overall_row["label"])
+            print("Lowest unsupported-answer rate row:", safest_row["label"])
+            if best_under_budget_row is None:
+                print("No loaded row satisfies the 20% unsupported-answer budget.")
+            else:
+                print("Best overall F1 row under the 20% unsupported-answer budget:", best_under_budget_row["label"])
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def final_comparison_save_code() -> str:
+    return (
+        dedent(
+            """
+            captured_notebook_path = save_executed_notebook_snapshot()
+            mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
+
+            if "comparison_df" not in globals():
+                print("Run the comparison cell first so the metrics table and figure list exist.")
+            else:
+                if not RUN_NOTES_FILE.exists():
+                    available_rows = comparison_df["label"].astype(str).tolist()
+                    figure_paths = []
+                    if COMPARISON_SUMMARY_JSON.exists():
+                        summary_payload = json.loads(COMPARISON_SUMMARY_JSON.read_text(encoding="utf-8"))
+                        figure_paths = summary_payload.get("figure_paths", [])
+
+                    RUN_NOTES_FILE.write_text(
+                        "\\n".join(
+                            [
+                                "# KeelNet Final Comparison Notes",
+                                "",
+                                "## Coverage",
+                                *[f"- {label}" for label in available_rows],
+                                "",
+                                "## Missing Stages Or Missing Artifacts",
+                                *([f"- {label}" for label in MISSING_STAGE_LABELS] if MISSING_STAGE_LABELS else ["- none"]),
+                                "",
+                                "## Output Paths",
+                                f"- Output folder: {OUTPUT_ROOT}",
+                                f"- Figures dir: {FIGURES_DIR}",
+                                f"- Comparison CSV: {COMPARISON_TABLE_CSV}",
+                                f"- Comparison JSON: {COMPARISON_TABLE_JSON}",
+                                f"- Comparison summary JSON: {COMPARISON_SUMMARY_JSON}",
+                                f"- Executed notebook archive target: {EXECUTED_NOTEBOOK_PATH}",
+                                "",
+                                "## Figures To Review",
+                                *([f"- {path}" for path in figure_paths] if figure_paths else ["- run the comparison cell first"]),
+                                "",
+                                "## Main Takeaway",
+                                "- ",
+                                "",
+                                "## Paper Follow-Ups",
+                                "1. ",
+                                "2. ",
+                                "3. ",
+                            ]
+                        )
+                        + "\\n",
+                        encoding="utf-8",
+                    )
+
+                RUN_SUMMARY_FILE.write_text(
+                    json.dumps(
+                        {
+                            "notebook": NOTEBOOK_TITLE,
+                            "run_name": RUN_NAME,
+                            "runtime_mode": RUNTIME_MODE,
+                            "git_branch": CURRENT_BRANCH,
+                            "output_root": str(OUTPUT_ROOT),
+                            "figures_dir": str(FIGURES_DIR),
+                            "comparison_csv": str(COMPARISON_TABLE_CSV),
+                            "comparison_json": str(COMPARISON_TABLE_JSON),
+                            "comparison_summary_json": str(COMPARISON_SUMMARY_JSON),
+                            "available_rows": comparison_df["label"].astype(str).tolist(),
+                            "missing_rows": MISSING_STAGE_LABELS,
+                            "executed_notebook_dir": str(NOTEBOOK_ARCHIVE_DIR),
+                            "executed_notebook_target": str(EXECUTED_NOTEBOOK_PATH),
+                            "executed_notebook_saved": captured_notebook_path is not None,
+                            "executed_notebook_instructions_file": str(EXECUTED_NOTEBOOK_INSTRUCTIONS_FILE),
+                        },
+                        indent=2,
+                    )
+                    + "\\n",
+                    encoding="utf-8",
+                )
+
+            print(f"Notes template: {RUN_NOTES_FILE}")
+            print(f"Run summary: {RUN_SUMMARY_FILE}")
+            print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
+            if captured_notebook_path is None:
+                print(
+                    "Automatic notebook capture was unavailable. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
+            if mirrored_output_root is not None:
+                print(f"Drive mirror: {mirrored_output_root}")
+            print("Current files under OUTPUT_ROOT:")
+            for path in sorted(OUTPUT_ROOT.rglob("*")):
+                print(path)
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def final_comparison_share_code() -> str:
+    return (
+        dedent(
+            """
+            from datetime import datetime, timezone
+
+            captured_notebook_path = save_executed_notebook_snapshot()
+            mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
+
+            available_rows = comparison_df["label"].astype(str).tolist() if "comparison_df" in globals() else []
+            best_overall_label = "<run comparison cell first>"
+            lowest_unsupported_label = "<run comparison cell first>"
+            figure_paths = []
+            if COMPARISON_SUMMARY_JSON.exists():
+                summary_payload = json.loads(COMPARISON_SUMMARY_JSON.read_text(encoding="utf-8"))
+                best_overall = summary_payload.get("best_overall_f1_row")
+                safest = summary_payload.get("lowest_unsupported_answer_rate_row")
+                if isinstance(best_overall, dict):
+                    best_overall_label = str(best_overall.get("label"))
+                if isinstance(safest, dict):
+                    lowest_unsupported_label = str(safest.get("label"))
+                figure_paths = summary_payload.get("figure_paths", [])
+
+            share_lines = [
+                "# KeelNet Final Comparison Share Note",
+                "",
+                f"- runtime mode: {RUNTIME_MODE}",
+                f"- branch name: {CURRENT_BRANCH}",
+                f"- RUN_NAME: {RUN_NAME}",
+                f"- available rows: {', '.join(available_rows) if available_rows else 'run comparison cell first'}",
+                f"- best overall F1 row: {best_overall_label}",
+                f"- lowest unsupported-answer-rate row: {lowest_unsupported_label}",
+                f"- comparison CSV: {COMPARISON_TABLE_CSV}",
+                f"- comparison summary JSON: {COMPARISON_SUMMARY_JSON}",
+                f"- executed notebook archive target: {EXECUTED_NOTEBOOK_PATH}",
+                "",
+                "## Figure Paths",
+                *([f"- {path}" for path in figure_paths] if figure_paths else ["- run comparison cell first"]),
+            ]
+            if mirrored_output_root is not None:
+                share_lines.append(f"- Drive mirror path: {mirrored_output_root}")
+
+            share_note = "\\n".join(share_lines) + "\\n"
+            SHARE_NOTE_FILE = OUTPUT_ROOT / "collab-share-note.md"
+            SHARE_NOTE_FILE.write_text(share_note, encoding="utf-8")
+            COMPLETION_MARKER_FILE.write_text(
+                "\\n".join(
+                    [
+                        f"run_name={RUN_NAME}",
+                        f"completed_at={datetime.now(timezone.utc).isoformat()}",
+                        f"share_note={SHARE_NOTE_FILE.name}",
+                        "status=completed",
+                    ]
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+            print(share_note)
+            if captured_notebook_path is None:
+                print(
+                    "Automatic notebook capture was unavailable. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
+            print(f"Saved share note: {SHARE_NOTE_FILE}")
+            print(f"Saved completion marker: {COMPLETION_MARKER_FILE}")
+            if mirrored_output_root is not None:
+                mirror_output_root(OUTPUT_ROOT)
+            """
+        ).strip()
+        + "\n"
+    )
 
 
 def load_notebook(path: Path) -> dict:
@@ -4163,9 +5598,13 @@ def sync_stage_2() -> None:
 
 
 def sync_generic_stage(stage: dict) -> None:
+    template_path = stage.get("template_path", DEFAULT_GENERIC_NOTEBOOK_TEMPLATE)
     if not stage["path"].exists():
-        scaffold_notebook(stage["path"], template_path=stage.get("template_path", DEFAULT_GENERIC_NOTEBOOK_TEMPLATE))
+        scaffold_notebook(stage["path"], template_path=template_path)
     notebook = load_notebook(stage["path"])
+    if len(notebook.get("cells", [])) < 19:
+        scaffold_notebook(stage["path"], template_path=template_path)
+        notebook = load_notebook(stage["path"])
     notebook["cells"][0]["source"] = source_lines(intro_markdown(stage["stage_label"], stage["stage_number"]))
     if "notes_markdown" in stage:
         notebook["cells"][1]["source"] = source_lines(stage["notes_markdown"])
@@ -4200,10 +5639,38 @@ def sync_generic_stage(stage: dict) -> None:
     save_notebook(stage["path"], notebook)
 
 
+def sync_final_comparison_notebook() -> None:
+    spec = FINAL_COMPARISON_NOTEBOOK
+    if not spec["path"].exists():
+        scaffold_notebook(spec["path"], template_path=DEFAULT_GENERIC_NOTEBOOK_TEMPLATE)
+    notebook = load_notebook(spec["path"])
+    notebook["cells"][0]["source"] = source_lines(final_comparison_intro_markdown())
+    notebook["cells"][1]["source"] = source_lines(FINAL_COMPARISON_NOTES_MARKDOWN)
+    notebook["cells"][2]["source"] = source_lines(SETUP_MARKDOWN)
+    notebook["cells"][3]["source"] = source_lines(setup_code(spec["branch"]))
+    notebook["cells"][4]["source"] = source_lines(FINAL_COMPARISON_CONFIG_MARKDOWN)
+    notebook["cells"][5]["source"] = source_lines(final_comparison_config_code())
+    notebook["cells"][6]["source"] = source_lines(VALIDATE_MARKDOWN)
+    notebook["cells"][7]["source"] = source_lines(VALIDATE_CODE)
+    notebook["cells"][8]["source"] = source_lines(FINAL_COMPARISON_DISCOVERY_MARKDOWN)
+    notebook["cells"][9]["source"] = source_lines("print(\"Comparison build starts in the next cell.\")\n")
+    notebook["cells"][10]["source"] = source_lines(FINAL_COMPARISON_IMPLEMENTATION_BANNER)
+    notebook["cells"][11]["source"] = source_lines(FINAL_COMPARISON_IMPLEMENTATION_MARKDOWN)
+    notebook["cells"][12]["source"] = source_lines(final_comparison_implementation_code())
+    notebook["cells"][13]["source"] = source_lines(FINAL_COMPARISON_NOTE_TEMPLATE_MARKDOWN)
+    notebook["cells"][14]["source"] = source_lines(FINAL_COMPARISON_SAVE_MARKDOWN)
+    notebook["cells"][15]["source"] = source_lines(final_comparison_save_code())
+    notebook["cells"][16]["source"] = source_lines(FINAL_COMPARISON_FINAL_MARKDOWN)
+    notebook["cells"][17]["source"] = source_lines(FINAL_COMPARISON_SHARE_MARKDOWN)
+    notebook["cells"][18]["source"] = source_lines(final_comparison_share_code())
+    save_notebook(spec["path"], notebook)
+
+
 def main() -> None:
     sync_stage_2()
     for stage in GENERIC_STAGES:
         sync_generic_stage(stage)
+    sync_final_comparison_notebook()
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ Stages:
 5. `05-retrieval-grounded-qa`
 6. `06-adaptive-constraint-balancing`
 7. `07-risk-budgeted-action-learning`
+8. `08-joint-optimization`
 
 Interpretation:
 
@@ -31,6 +32,7 @@ Interpretation:
 - Retrieval is now deferred as a later realism extension after the core proof path is stable.
 - Stage `06` is the optional adaptive extension after the strongest fixed or constrained baseline is already clear.
 - Stage `07` is the explicit utility-versus-risk action-learning extension if Stage `06` still behaves like a weak conservatizing wrapper.
+- Stage `08` is the hybrid wrap-up stage that keeps Stage `05` as the answer engine and adds calibrated control back on top.
 
 Current execution priority:
 
@@ -39,14 +41,14 @@ Current execution priority:
 - `05-retrieval-grounded-qa` as the support-constrained learning comparison after a strong Stage 4 baseline
 - `06-adaptive-constraint-balancing` only if Stage 5 still leaves meaningful headroom
 - `07-risk-budgeted-action-learning` only if Stage 6 still needs a stronger decision formulation
+- `08-joint-optimization` only if the final answer is likely to be a hybrid instead of a pure modular or pure direct-learning system
 - retrieval realism later, after the core Stage 4 versus Stage 5 comparison is stable
 
 Current implementation status:
 
 - Stage `01` has the completed supporting implementation and reference results
 - Stage `02` now has the supporting implementation plus a completed reference run, which shows a learnable verifier signal but only a modest end-to-end gain
-- Stages `03` to `06` have teammate notebooks and a shared workflow, but their full stage-specific Python code paths still need to be completed during implementation
-- Stage `07` currently starts as a teammate notebook and paper-facing design stage before its stage-specific Python path exists
+- Stages `03` to `08` now have teammate notebooks and runnable stage-specific Python paths in the repo
 
 Current findings snapshot:
 
@@ -95,6 +97,7 @@ Recommended shared branches:
 - `stage/05-retrieval-grounded-qa`
 - `stage/06-adaptive-constraint-balancing`
 - `stage/07-risk-budgeted-action-learning`
+- `stage/08-joint-optimization`
 
 Suggested workflow:
 
