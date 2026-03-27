@@ -8,6 +8,7 @@ Default rule:
 
 - keep exactly one teammate-facing notebook template per stage at
   `notebooks/stage-XX-<stage-name>-colab.ipynb`
+- treat that repo notebook as the clean template, not the long-term executed archive
 - add result files only when they are actually used
 - keep experiment artifacts in Google Drive, not inside the repo
 
@@ -21,6 +22,7 @@ Stages:
 4. `04-unsupported-confidence-control`
 5. `05-retrieval-grounded-qa`
 6. `06-adaptive-constraint-balancing`
+7. `07-risk-budgeted-action-learning`
 
 Interpretation:
 
@@ -28,6 +30,7 @@ Interpretation:
 - Stage `05` now hosts the support-constrained learning comparison, even though the folder name still reflects the older retrieval plan.
 - Retrieval is now deferred as a later realism extension after the core proof path is stable.
 - Stage `06` is the optional adaptive extension after the strongest fixed or constrained baseline is already clear.
+- Stage `07` is the explicit utility-versus-risk action-learning extension if Stage `06` still behaves like a weak conservatizing wrapper.
 
 Current execution priority:
 
@@ -35,6 +38,7 @@ Current execution priority:
 - `04-unsupported-confidence-control`
 - `05-retrieval-grounded-qa` as the support-constrained learning comparison after a strong Stage 4 baseline
 - `06-adaptive-constraint-balancing` only if Stage 5 still leaves meaningful headroom
+- `07-risk-budgeted-action-learning` only if Stage 6 still needs a stronger decision formulation
 - retrieval realism later, after the core Stage 4 versus Stage 5 comparison is stable
 
 Current implementation status:
@@ -42,6 +46,7 @@ Current implementation status:
 - Stage `01` has the completed supporting implementation and reference results
 - Stage `02` now has the supporting implementation plus a completed reference run, which shows a learnable verifier signal but only a modest end-to-end gain
 - Stages `03` to `06` have teammate notebooks and a shared workflow, but their full stage-specific Python code paths still need to be completed during implementation
+- Stage `07` currently starts as a teammate notebook and paper-facing design stage before its stage-specific Python path exists
 
 Current findings snapshot:
 
@@ -51,7 +56,6 @@ Current findings snapshot:
 
 Current active stage files:
 
-- `results-template.md`
 - `notebooks/stage-XX-<stage-name>-colab.ipynb`
 
 Examples:
@@ -65,12 +69,16 @@ Use the stage-specific `stage-XX-...-colab.ipynb` files as the canonical
 notebook names for each stage.
 For follow-up variants, keep the same pattern and insert the substage number,
 for example `stage-02-5-...-colab.ipynb`.
+If you want to preserve outputs from a meaningful run, export the executed
+notebook into that run's artifact folder under `OUTPUT_ROOT/executed-notebook/`
+instead of overwriting the canonical template file in the repo.
 
 Shared note template:
 
 - `stage-note-template.md`
 
 Use the shared template for lightweight stage planning and run notes in Stages `02` to `06`. Keep notes short and update them before implementation, after smoke test, and after any run worth sharing.
+Use the same pattern for Stage `07`.
 
 ## Collaboration Branching
 
@@ -86,6 +94,7 @@ Recommended shared branches:
 - `stage/04-unsupported-confidence-control`
 - `stage/05-retrieval-grounded-qa`
 - `stage/06-adaptive-constraint-balancing`
+- `stage/07-risk-budgeted-action-learning`
 
 Suggested workflow:
 
