@@ -29,7 +29,7 @@ from keelnet.config import (
     DEFAULT_SUPPORT_MATCH_F1,
     DEFAULT_VALIDATION_SIZE,
 )
-from keelnet.data import build_reference_index, load_stage1_splits
+from keelnet.data import build_reference_index, load_stage1_clean_splits, load_stage1_splits
 from keelnet.metrics import (
     compute_answer_support_mix,
     compute_stage1_metrics,
@@ -96,6 +96,8 @@ class AdaptiveBalanceConfig:
     hard_negative_weight: float
     max_train_samples: int | None
     max_eval_samples: int | None
+    clean_splitting: bool = False
+    max_test_samples: int | None = None
 
 
 FEATURE_NAMES = [
@@ -501,6 +503,8 @@ def _prepare_stage5_prediction_artifacts(
     eval_batch_size: int,
     max_train_samples: int | None,
     max_eval_samples: int | None,
+    clean_splitting: bool = False,
+    max_test_samples: int | None = None,
 ) -> dict[str, Any]:
     from transformers import AutoTokenizer, Trainer, TrainingArguments
 
@@ -511,13 +515,23 @@ def _prepare_stage5_prediction_artifacts(
         prepare_stage5_eval_artifacts,
     )
 
-    splits = load_stage1_splits(
-        validation_size=validation_size,
-        seed=seed,
-        answer_only_train=False,
-        max_train_samples=max_train_samples,
-        max_eval_samples=max_eval_samples,
-    )
+    if clean_splitting:
+        splits = load_stage1_clean_splits(
+            validation_size=validation_size,
+            seed=seed,
+            answer_only_train=False,
+            max_train_samples=max_train_samples,
+            max_eval_samples=max_eval_samples,
+            max_test_samples=max_test_samples,
+        )
+    else:
+        splits = load_stage1_splits(
+            validation_size=validation_size,
+            seed=seed,
+            answer_only_train=False,
+            max_train_samples=max_train_samples,
+            max_eval_samples=max_eval_samples,
+        )
 
     tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
     model = load_stage5_model(model_path)
@@ -532,7 +546,7 @@ def _prepare_stage5_prediction_artifacts(
     )
 
     artifacts: dict[str, Any] = {"splits": splits}
-    for split_name in ("train", "validation", "dev"):
+    for split_name in splits.keys():
         split_examples = splits[split_name]
         eval_features, eval_model_dataset = prepare_stage5_eval_artifacts(
             split_examples,
@@ -713,6 +727,12 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--dropout", type=float, default=0.10)
     train_parser.add_argument("--max-train-samples", type=int, default=None)
     train_parser.add_argument("--max-eval-samples", type=int, default=None)
+    train_parser.add_argument(
+        "--clean-splitting",
+        action="store_true",
+        help="Use train/validation/test splits and keep the official SQuAD validation split untouched for final testing.",
+    )
+    train_parser.add_argument("--max-test-samples", type=int, default=None)
     train_parser.add_argument("--max-candidates-per-example", type=int, default=6)
     train_parser.add_argument("--max-candidates-per-feature", type=int, default=3)
     train_parser.add_argument("--positive-weight", type=float, default=1.0)
@@ -740,6 +760,12 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     eval_parser.add_argument("--eval-batch-size", type=int, default=8)
     eval_parser.add_argument("--max-eval-samples", type=int, default=None)
+    eval_parser.add_argument(
+        "--clean-splitting",
+        action="store_true",
+        help="Use train/validation/test splits and report final results on the untouched test split.",
+    )
+    eval_parser.add_argument("--max-test-samples", type=int, default=None)
     eval_parser.add_argument("--match-f1-threshold", type=float, default=DEFAULT_SUPPORT_MATCH_F1)
     eval_parser.add_argument(
         "--candidate-threshold-min",
@@ -780,6 +806,8 @@ def _train_controller(args: argparse.Namespace) -> None:
         eval_batch_size=args.eval_batch_size,
         max_train_samples=args.max_train_samples,
         max_eval_samples=args.max_eval_samples,
+        clean_splitting=args.clean_splitting,
+        max_test_samples=args.max_test_samples,
     )
     train_bundle = build_candidate_bundle(
         artifacts["train"]["examples"],
@@ -962,6 +990,8 @@ def _train_controller(args: argparse.Namespace) -> None:
         hard_negative_weight=args.hard_negative_weight,
         max_train_samples=args.max_train_samples,
         max_eval_samples=args.max_eval_samples,
+        clean_splitting=args.clean_splitting,
+        max_test_samples=args.max_test_samples,
     )
     _save_controller(model.cpu(), args.output_dir, config, training_history)
 
@@ -973,6 +1003,8 @@ def _train_controller(args: argparse.Namespace) -> None:
         "train_candidate_count": len(train_bundle.records),
         "validation_candidate_count": len(validation_bundle.records),
         "best_epoch": best_entry["epoch"] if best_entry is not None else None,
+        "clean_splitting": bool(args.clean_splitting),
+        "max_test_samples": args.max_test_samples,
     }
     (args.output_dir / "run_config.json").write_text(
         json.dumps(run_metadata, indent=2) + "\n",
@@ -984,6 +1016,13 @@ def _evaluate_controller(args: argparse.Namespace) -> None:
     args.output_path.parent.mkdir(parents=True, exist_ok=True)
     controller, config = load_controller(args.controller_path)
     resolved_stage5_model_path = args.stage5_model_path or Path(config.stage5_model_path)
+    clean_splitting = bool(args.clean_splitting or getattr(config, "clean_splitting", False))
+    resolved_max_test_samples = (
+        args.max_test_samples
+        if args.max_test_samples is not None
+        else getattr(config, "max_test_samples", None)
+    )
+    final_split_name = "test" if clean_splitting else "dev"
     feature_mean = np.asarray(config.feature_mean, dtype=np.float32)
     feature_std = np.asarray(config.feature_std, dtype=np.float32)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -998,6 +1037,8 @@ def _evaluate_controller(args: argparse.Namespace) -> None:
         eval_batch_size=args.eval_batch_size,
         max_train_samples=None,
         max_eval_samples=args.max_eval_samples,
+        clean_splitting=clean_splitting,
+        max_test_samples=resolved_max_test_samples,
     )
     validation_bundle = build_candidate_bundle(
         artifacts["validation"]["examples"],
@@ -1011,11 +1052,11 @@ def _evaluate_controller(args: argparse.Namespace) -> None:
         match_f1_threshold=args.match_f1_threshold,
         hard_negative_weight=config.hard_negative_weight,
     )
-    dev_bundle = build_candidate_bundle(
-        artifacts["dev"]["examples"],
-        artifacts["dev"]["features"],
-        artifacts["dev"]["raw_predictions"],
-        artifacts["dev"]["references"],
+    final_bundle = build_candidate_bundle(
+        artifacts[final_split_name]["examples"],
+        artifacts[final_split_name]["features"],
+        artifacts[final_split_name]["raw_predictions"],
+        artifacts[final_split_name]["references"],
         n_best_size=config.n_best_size,
         max_answer_length=config.max_answer_length,
         max_candidates_per_example=config.max_candidates_per_example,
@@ -1032,13 +1073,13 @@ def _evaluate_controller(args: argparse.Namespace) -> None:
         labels=validation_bundle.labels,
         sample_weights=validation_bundle.sample_weights,
     )
-    standardized_dev_bundle = CandidateBundle(
-        feature_names=dev_bundle.feature_names,
-        all_example_ids=dev_bundle.all_example_ids,
-        records=dev_bundle.records,
-        features=standardize_features(dev_bundle.features, feature_mean, feature_std),
-        labels=dev_bundle.labels,
-        sample_weights=dev_bundle.sample_weights,
+    standardized_final_bundle = CandidateBundle(
+        feature_names=final_bundle.feature_names,
+        all_example_ids=final_bundle.all_example_ids,
+        records=final_bundle.records,
+        features=standardize_features(final_bundle.features, feature_mean, feature_std),
+        labels=final_bundle.labels,
+        sample_weights=final_bundle.sample_weights,
     )
 
     validation_probabilities = _predict_candidate_probabilities(
@@ -1047,9 +1088,9 @@ def _evaluate_controller(args: argparse.Namespace) -> None:
         batch_size=max(32, config.train_batch_size),
         device=device,
     )
-    dev_probabilities = _predict_candidate_probabilities(
+    final_probabilities = _predict_candidate_probabilities(
         controller,
-        standardized_dev_bundle.features,
+        standardized_final_bundle.features,
         batch_size=max(32, config.train_batch_size),
         device=device,
     )
@@ -1065,15 +1106,15 @@ def _evaluate_controller(args: argparse.Namespace) -> None:
         max_unsupported_answer_rate=args.max_unsupported_answer_rate,
     )
 
-    dev_predictions = postprocess_stage6_predictions(
-        standardized_dev_bundle,
-        dev_probabilities,
+    final_predictions = postprocess_stage6_predictions(
+        standardized_final_bundle,
+        final_probabilities,
         threshold=selected_threshold,
     )
-    dev_metrics = compute_stage1_metrics(dev_predictions, artifacts["dev"]["references"])
-    dev_mix = compute_answer_support_mix(
-        dev_predictions,
-        artifacts["dev"]["references"],
+    final_metrics = compute_stage1_metrics(final_predictions, artifacts[final_split_name]["references"])
+    final_mix = compute_answer_support_mix(
+        final_predictions,
+        artifacts[final_split_name]["references"],
         match_f1_threshold=args.match_f1_threshold,
     )
 
@@ -1081,16 +1122,26 @@ def _evaluate_controller(args: argparse.Namespace) -> None:
         "stage": "stage6-adaptive-balance-eval",
         "controller_path": str(args.controller_path),
         "stage5_model_path": str(resolved_stage5_model_path),
+        "clean_splitting": clean_splitting,
+        "final_eval_split": final_split_name,
         "selected_candidate_threshold": selected_threshold,
         "max_unsupported_answer_rate": args.max_unsupported_answer_rate,
         "validation_metrics": validation_metrics,
         "validation_mix": validation_mix,
         "threshold_sweep": threshold_sweep,
-        "dev_metrics": dev_metrics,
-        "dev_mix": dev_mix,
-        "dev_predictions": dev_predictions,
+        "final_metrics": final_metrics,
+        "final_mix": final_mix,
+        "final_predictions": final_predictions,
         "feature_names": list(config.feature_names),
     }
+    if final_split_name == "dev":
+        output["dev_metrics"] = final_metrics
+        output["dev_mix"] = final_mix
+        output["dev_predictions"] = final_predictions
+    else:
+        output["test_metrics"] = final_metrics
+        output["test_mix"] = final_mix
+        output["test_predictions"] = final_predictions
     args.output_path.write_text(json.dumps(output, indent=2) + "\n", encoding="utf-8")
 
 
