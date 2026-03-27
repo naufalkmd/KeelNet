@@ -2318,7 +2318,7 @@ def stage6_config_code() -> str:
             COMPLETION_MARKER_NAME = "RUN_COMPLETED.txt"
 
             STAGE_TITLE = "Stage 6: Adaptive Constraint Balancing"
-            STAGE_OBJECTIVE = "Only if needed, beat the strongest earlier fixed or constrained baseline by adapting Stage 5 candidate selection under the unsupported-answer budget."
+            STAGE_OBJECTIVE = "Only if needed, beat the strongest earlier fixed or constrained baseline by adapting Stage 5 candidate selection under the unsupported-answer budget, while keeping the final SQuAD validation split untouched for final testing."
             TARGET_METRICS = [
                 "overall F1",
                 "answerable F1",
@@ -2431,6 +2431,7 @@ def stage6_config_code() -> str:
             HARD_NEGATIVE_WEIGHT = 1.5
             MAX_TRAIN_SAMPLES = None
             MAX_EVAL_SAMPLES = None
+            CLEAN_SPLITTING = True
             MAX_UNSUPPORTED_ANSWER_RATE = 20.0
             CANDIDATE_THRESHOLD_MIN = 0.05
             CANDIDATE_THRESHOLD_MAX = 0.95
@@ -2459,6 +2460,11 @@ def stage6_config_code() -> str:
                 if value is None:
                     return
                 cmd.extend([flag, str(value)])
+
+
+            def maybe_add_flag(cmd: list[str], flag: str, enabled: bool) -> None:
+                if enabled:
+                    cmd.append(flag)
 
 
             def build_train_command(
@@ -2511,8 +2517,10 @@ def stage6_config_code() -> str:
                     "--max-unsupported-answer-rate",
                     str(MAX_UNSUPPORTED_ANSWER_RATE),
                 ]
+                maybe_add_flag(cmd, "--clean-splitting", CLEAN_SPLITTING)
                 maybe_add_arg(cmd, "--max-train-samples", max_train_samples)
                 maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                maybe_add_arg(cmd, "--max-test-samples", max_eval_samples if CLEAN_SPLITTING else None)
                 return cmd
 
 
@@ -2545,7 +2553,9 @@ def stage6_config_code() -> str:
                     "--max-unsupported-answer-rate",
                     str(MAX_UNSUPPORTED_ANSWER_RATE),
                 ]
+                maybe_add_flag(cmd, "--clean-splitting", CLEAN_SPLITTING)
                 maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                maybe_add_arg(cmd, "--max-test-samples", max_eval_samples if CLEAN_SPLITTING else None)
                 return cmd
 
 
@@ -2802,15 +2812,24 @@ def stage6_share_code() -> str:
             metric_lines = [f"- {metric}: <fill in after review>" for metric in TARGET_METRICS]
             if BALANCER_EVAL.exists():
                 balance_results = json.loads(BALANCER_EVAL.read_text(encoding="utf-8"))
-                dev_metrics = balance_results["dev_metrics"]
-                dev_mix = balance_results["dev_mix"]
+                eval_split_label = balance_results.get("final_eval_split", "dev")
+                result_metrics = (
+                    balance_results.get("final_metrics")
+                    or balance_results.get(f"{eval_split_label}_metrics")
+                    or balance_results["dev_metrics"]
+                )
+                result_mix = (
+                    balance_results.get("final_mix")
+                    or balance_results.get(f"{eval_split_label}_mix")
+                    or balance_results["dev_mix"]
+                )
                 metric_lines = [
-                    f"- Overall F1 (dev): {dev_metrics['overall_f1']:.2f}",
-                    f"- Answerable F1 (dev): {dev_metrics['answerable_f1']:.2f}",
-                    f"- Unsupported-answer rate (dev): {dev_metrics['unsupported_answer_rate']:.2f}",
-                    f"- Abstain F1 (dev): {dev_metrics['abstain_f1']:.2f}",
-                    f"- Supported-answer rate (among answers, dev): {dev_mix['supported_answer_rate']:.2f}",
-                    f"- Answer rate (dev): {dev_mix['answer_rate']:.2f}",
+                    f"- Overall F1 ({eval_split_label}): {result_metrics['overall_f1']:.2f}",
+                    f"- Answerable F1 ({eval_split_label}): {result_metrics['answerable_f1']:.2f}",
+                    f"- Unsupported-answer rate ({eval_split_label}): {result_metrics['unsupported_answer_rate']:.2f}",
+                    f"- Abstain F1 ({eval_split_label}): {result_metrics['abstain_f1']:.2f}",
+                    f"- Supported-answer rate (among answers, {eval_split_label}): {result_mix['supported_answer_rate']:.2f}",
+                    f"- Answer rate ({eval_split_label}): {result_mix['answer_rate']:.2f}",
                     f"- Selected candidate threshold: {balance_results['selected_candidate_threshold']:.2f}",
                     f"- Max unsupported-answer rate budget: {balance_results['max_unsupported_answer_rate']:.2f}",
                 ]
@@ -2818,24 +2837,39 @@ def stage6_share_code() -> str:
                     baseline_results = json.loads(COMPARISON_BASELINE_EVAL_PATH.read_text(encoding="utf-8"))
                     baseline_metrics = None
                     baseline_mix = None
-                    if "control_dev_metrics" in baseline_results:
+                    baseline_split_label = None
+                    if "final_metrics" in baseline_results and "final_mix" in baseline_results:
+                        baseline_split_label = baseline_results.get("final_eval_split", "dev")
+                        baseline_metrics = baseline_results["final_metrics"]
+                        baseline_mix = baseline_results["final_mix"]
+                    elif "control_dev_metrics" in baseline_results:
+                        baseline_split_label = "dev"
                         baseline_metrics = baseline_results["control_dev_metrics"]
                         baseline_mix = baseline_results["control_dev_mix"]
                     elif "dev_metrics" in baseline_results:
+                        baseline_split_label = "dev"
                         baseline_metrics = baseline_results["dev_metrics"]
                         baseline_mix = baseline_results["dev_mix"]
 
-                    if baseline_metrics is not None and baseline_mix is not None:
+                    if (
+                        baseline_metrics is not None
+                        and baseline_mix is not None
+                        and baseline_split_label == eval_split_label
+                    ):
                         metric_lines = [
-                            f"- Overall F1 (dev): {baseline_metrics['overall_f1']:.2f} -> {dev_metrics['overall_f1']:.2f}",
-                            f"- Answerable F1 (dev): {baseline_metrics['answerable_f1']:.2f} -> {dev_metrics['answerable_f1']:.2f}",
-                            f"- Unsupported-answer rate (dev): {baseline_metrics['unsupported_answer_rate']:.2f} -> {dev_metrics['unsupported_answer_rate']:.2f}",
-                            f"- Abstain F1 (dev): {baseline_metrics['abstain_f1']:.2f} -> {dev_metrics['abstain_f1']:.2f}",
-                            f"- Supported-answer rate (among answers, dev): {baseline_mix['supported_answer_rate']:.2f} -> {dev_mix['supported_answer_rate']:.2f}",
-                            f"- Answer rate (dev): {baseline_mix['answer_rate']:.2f} -> {dev_mix['answer_rate']:.2f}",
+                            f"- Overall F1 ({eval_split_label}): {baseline_metrics['overall_f1']:.2f} -> {result_metrics['overall_f1']:.2f}",
+                            f"- Answerable F1 ({eval_split_label}): {baseline_metrics['answerable_f1']:.2f} -> {result_metrics['answerable_f1']:.2f}",
+                            f"- Unsupported-answer rate ({eval_split_label}): {baseline_metrics['unsupported_answer_rate']:.2f} -> {result_metrics['unsupported_answer_rate']:.2f}",
+                            f"- Abstain F1 ({eval_split_label}): {baseline_metrics['abstain_f1']:.2f} -> {result_metrics['abstain_f1']:.2f}",
+                            f"- Supported-answer rate (among answers, {eval_split_label}): {baseline_mix['supported_answer_rate']:.2f} -> {result_mix['supported_answer_rate']:.2f}",
+                            f"- Answer rate ({eval_split_label}): {baseline_mix['answer_rate']:.2f} -> {result_mix['answer_rate']:.2f}",
                             f"- Selected candidate threshold: {balance_results['selected_candidate_threshold']:.2f}",
                             f"- Max unsupported-answer rate budget: {balance_results['max_unsupported_answer_rate']:.2f}",
                         ]
+                    elif baseline_metrics is not None and baseline_mix is not None:
+                        metric_lines.append(
+                            f"- Baseline comparison skipped: baseline reports {baseline_split_label}, current run reports {eval_split_label}."
+                        )
 
             share_lines = [
                 f"# {STAGE_TITLE} Share Note",
@@ -2902,7 +2936,7 @@ def stage7_config_code() -> str:
             COMPLETION_MARKER_NAME = "RUN_COMPLETED.txt"
 
             STAGE_TITLE = "Stage 7: Risk-Budgeted Action Learning"
-            STAGE_OBJECTIVE = "Turn Stage 6 into an explicit utility-versus-risk action learner that chooses among answer candidates and abstain under an unsupported-answer budget."
+            STAGE_OBJECTIVE = "Turn Stage 6 into an explicit utility-versus-risk action learner that chooses among answer candidates and abstain under an unsupported-answer budget, while keeping the final SQuAD validation split untouched for final testing."
             TARGET_METRICS = [
                 "overall F1",
                 "answerable F1",
@@ -3026,6 +3060,7 @@ def stage7_config_code() -> str:
             OVERABSTAIN_DUAL_LR = 0.25
             MAX_TRAIN_SAMPLES = None
             MAX_EVAL_SAMPLES = None
+            CLEAN_SPLITTING = True
             SMOKE_TEST_TRAIN_SAMPLES = 256
             SMOKE_TEST_EVAL_SAMPLES = 128
             SMOKE_TEST_EPOCHS = 2
@@ -3137,6 +3172,11 @@ def stage7_config_code() -> str:
                 cmd.extend([flag, str(value)])
 
 
+            def maybe_add_flag(cmd: list[str], flag: str, enabled: bool) -> None:
+                if enabled:
+                    cmd.append(flag)
+
+
             def build_train_command(
                 stage5_model_dir: Path,
                 output_dir: Path,
@@ -3196,8 +3236,10 @@ def stage7_config_code() -> str:
                 ]
                 if stage6_controller_dir is not None:
                     cmd.extend(["--stage6-controller-path", str(stage6_controller_dir)])
+                maybe_add_flag(cmd, "--clean-splitting", CLEAN_SPLITTING)
                 maybe_add_arg(cmd, "--max-train-samples", max_train_samples)
                 maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                maybe_add_arg(cmd, "--max-test-samples", max_eval_samples if CLEAN_SPLITTING else None)
                 return cmd
 
 
@@ -3235,7 +3277,9 @@ def stage7_config_code() -> str:
                 ]
                 if stage6_controller_dir is not None:
                     cmd.extend(["--stage6-controller-path", str(stage6_controller_dir)])
+                maybe_add_flag(cmd, "--clean-splitting", CLEAN_SPLITTING)
                 maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                maybe_add_arg(cmd, "--max-test-samples", max_eval_samples if CLEAN_SPLITTING else None)
                 return cmd
 
 
@@ -3521,26 +3565,26 @@ def stage8_config_code() -> str:
             DRIVE_PROJECT_DIR = Path(DRIVE_PROJECT_DIR).resolve() if DRIVE_PROJECT_DIR is not None else None
 
             AUTHOR_NAME = "naufal"
-            RUN_BASENAME = f"{AUTHOR_NAME}-stage8"
-            ARTIFACTS_ROOT = PROJECT_STORAGE_DIR / "artifacts" / "stage8_colab"
+            RUN_BASENAME = f"{AUTHOR_NAME}-stage8-2"
+            ARTIFACTS_ROOT = PROJECT_STORAGE_DIR / "artifacts" / "stage8_2_colab"
             COMPLETION_MARKER_NAME = "RUN_COMPLETED.txt"
 
-            STAGE_TITLE = "Stage 8: Hybrid Stage 5 Plus Calibrated Control"
-            STAGE_OBJECTIVE = "Freeze Stage 5 as the answer engine, rescore its candidates with the calibrated verifier from Stage 4, and train a lightweight final controller on top."
+            STAGE_TITLE = "Stage 8.2: Action Learner + Calibrated Support"
+            STAGE_OBJECTIVE = "Keep Stage 5 as the answer engine, inject calibrated Stage 4 support into the Stage 7 action learner, optionally retain the Stage 6 prior, and report final metrics on a truly untouched test split."
             TARGET_METRICS = [
                 "overall F1",
                 "answerable F1",
                 "unsupported-answer rate",
                 "supported-answer rate",
                 "answer rate",
-                "comparison against Stage 4 and Stage 5",
+                "comparison against Stage 5 and Stage 7",
             ]
             IMPLEMENTATION_HINTS = [
-                "input: frozen Stage 5 candidate answers plus the Stage 4 control artifact",
-                "output: a lightweight hybrid controller with a hard calibrated support shield",
-                "success means a better answer-quality versus groundedness balance than raw Stage 5",
+                "input: frozen Stage 5 candidate answers, calibrated Stage 4 support, and optionally the Stage 6 prior",
+                "output: a decision-aware action learner over {candidate_1 ... candidate_k, abstain}",
+                "success means a better answer-quality versus groundedness balance than raw Stage 5 or plain Stage 7",
             ]
-            SUGGESTED_MODULES = ["keelnet.hybrid", "keelnet.learn", "keelnet.control", "keelnet.verify", "keelnet.metrics"]
+            SUGGESTED_MODULES = ["keelnet.action", "keelnet.control", "keelnet.learn", "keelnet.verify", "keelnet.metrics"]
 
 
             def completed_versions(root: Path, run_basename: str) -> list[int]:
@@ -3615,31 +3659,50 @@ def stage8_config_code() -> str:
                 "learner_eval.json",
                 preferred_run_prefix=f"{AUTHOR_NAME}-stage5",
             )
+            DEFAULT_STAGE6_BALANCER_DIR = default_upstream_path(
+                "stage6_colab",
+                "balancer",
+                preferred_run_prefix=f"{AUTHOR_NAME}-stage6",
+            )
             DEFAULT_STAGE4_CONTROL_EVAL = default_upstream_path(
                 "stage4_colab",
                 "control_eval.json",
                 preferred_run_prefix=f"{AUTHOR_NAME}-stage4",
             )
+            DEFAULT_STAGE7_EVAL = default_upstream_path(
+                "stage7_colab",
+                "risk_action_eval.json",
+                preferred_run_prefix=f"{AUTHOR_NAME}-stage7",
+            )
             STAGE5_MODEL_DIR = DEFAULT_STAGE5_MODEL_DIR
+            STAGE6_BALANCER_DIR = DEFAULT_STAGE6_BALANCER_DIR
             CONTROL_EVAL_PATH = DEFAULT_STAGE4_CONTROL_EVAL
-            COMPARISON_BASELINE_EVAL_PATH = DEFAULT_STAGE4_CONTROL_EVAL or DEFAULT_STAGE5_EVAL
+            COMPARISON_BASELINE_EVAL_PATH = DEFAULT_STAGE7_EVAL or DEFAULT_STAGE5_EVAL
 
-            TRAIN_BATCH_SIZE = 64
-            EVAL_BATCH_SIZE = 16
-            CONTROLLER_EPOCHS = 10
-            CONTROLLER_LR = 1e-3
-            CONTROLLER_WEIGHT_DECAY = 0.01
-            HIDDEN_SIZE = 32
+            TRAIN_BATCH_SIZE = 16
+            EVAL_BATCH_SIZE = 32
+            ACTION_EPOCHS = 12
+            ACTION_LR = 2e-3
+            ACTION_WEIGHT_DECAY = 0.01
+            HIDDEN_SIZE = 64
             DROPOUT = 0.10
-            POSITIVE_WEIGHT = 1.0
-            NEGATIVE_WEIGHT = 2.0
-            HARD_NEGATIVE_WEIGHT = 1.5
             MAX_CANDIDATES_PER_EXAMPLE = 6
             MAX_CANDIDATES_PER_FEATURE = 3
             MAX_UNSUPPORTED_ANSWER_RATE = 20.0
-            CANDIDATE_THRESHOLD_MIN = 0.05
-            CANDIDATE_THRESHOLD_MAX = 0.95
-            CANDIDATE_THRESHOLD_STEP = 0.05
+            MAX_OVERABSTAIN_RATE = 20.0
+            RISK_THRESHOLD_MIN = 0.10
+            RISK_THRESHOLD_MAX = 0.90
+            RISK_THRESHOLD_STEP = 0.05
+            ACTION_LOSS_WEIGHT = 1.0
+            UTILITY_LOSS_WEIGHT = 0.5
+            RISK_LOSS_WEIGHT = 1.0
+            TAIL_RISK_WEIGHT = 2.0
+            INITIAL_UNSAFE_DUAL = 1.0
+            INITIAL_OVERABSTAIN_DUAL = 1.0
+            UNSAFE_DUAL_LR = 0.25
+            OVERABSTAIN_DUAL_LR = 0.25
+            HARD_RISK_SHIELD = 0.35
+            CLEAN_SPLITTING = True
             MAX_TRAIN_SAMPLES = None
             MAX_EVAL_SAMPLES = None
 
@@ -3648,7 +3711,7 @@ def stage8_config_code() -> str:
             SMOKE_TEST_EVAL_SAMPLES = 128
             SMOKE_TEST_EPOCHS = 2
 
-            HYBRID_DIR = OUTPUT_ROOT / "hybrid-controller"
+            HYBRID_DIR = OUTPUT_ROOT / "stage8-2-action-learner"
             HYBRID_EVAL = OUTPUT_ROOT / "hybrid_eval.json"
 
             if STAGE5_MODEL_DIR is not None:
@@ -3660,6 +3723,11 @@ def stage8_config_code() -> str:
                 CONTROL_EVAL_PATH = Path(CONTROL_EVAL_PATH).expanduser().resolve()
                 if not CONTROL_EVAL_PATH.exists():
                     raise FileNotFoundError(f"Stage 4 control eval not found: {CONTROL_EVAL_PATH}")
+
+            if STAGE6_BALANCER_DIR is not None:
+                STAGE6_BALANCER_DIR = Path(STAGE6_BALANCER_DIR).expanduser().resolve()
+                if not STAGE6_BALANCER_DIR.exists():
+                    raise FileNotFoundError(f"Stage 6 balancer directory not found: {STAGE6_BALANCER_DIR}")
 
             if COMPARISON_BASELINE_EVAL_PATH is not None:
                 COMPARISON_BASELINE_EVAL_PATH = Path(COMPARISON_BASELINE_EVAL_PATH).expanduser().resolve()
@@ -3703,11 +3771,17 @@ def stage8_config_code() -> str:
                 cmd.extend([flag, str(value)])
 
 
+            def maybe_add_flag(cmd: list[str], flag: str, enabled: bool) -> None:
+                if enabled:
+                    cmd.append(flag)
+
+
             def build_train_command(
                 stage5_model_dir: Path,
                 control_eval_path: Path,
                 output_dir: Path,
                 *,
+                stage6_controller_dir: Path | None,
                 max_train_samples: int | None,
                 max_eval_samples: int | None,
                 num_train_epochs: int,
@@ -3715,7 +3789,7 @@ def stage8_config_code() -> str:
                 cmd = [
                     sys.executable,
                     "-m",
-                    "keelnet.hybrid",
+                    "keelnet.action",
                     "train",
                     "--stage5-model-path",
                     str(stage5_model_dir),
@@ -3728,30 +3802,48 @@ def stage8_config_code() -> str:
                     "--eval-batch-size",
                     str(EVAL_BATCH_SIZE),
                     "--learning-rate",
-                    str(CONTROLLER_LR),
+                    str(ACTION_LR),
                     "--weight-decay",
-                    str(CONTROLLER_WEIGHT_DECAY),
+                    str(ACTION_WEIGHT_DECAY),
                     "--num-train-epochs",
                     str(num_train_epochs),
                     "--hidden-size",
                     str(HIDDEN_SIZE),
                     "--dropout",
                     str(DROPOUT),
-                    "--positive-weight",
-                    str(POSITIVE_WEIGHT),
-                    "--negative-weight",
-                    str(NEGATIVE_WEIGHT),
-                    "--hard-negative-weight",
-                    str(HARD_NEGATIVE_WEIGHT),
                     "--max-candidates-per-example",
                     str(MAX_CANDIDATES_PER_EXAMPLE),
                     "--max-candidates-per-feature",
                     str(MAX_CANDIDATES_PER_FEATURE),
+                    "--action-loss-weight",
+                    str(ACTION_LOSS_WEIGHT),
+                    "--utility-loss-weight",
+                    str(UTILITY_LOSS_WEIGHT),
+                    "--risk-loss-weight",
+                    str(RISK_LOSS_WEIGHT),
+                    "--tail-risk-weight",
+                    str(TAIL_RISK_WEIGHT),
                     "--max-unsupported-answer-rate",
                     str(MAX_UNSUPPORTED_ANSWER_RATE),
+                    "--max-overabstain-rate",
+                    str(MAX_OVERABSTAIN_RATE),
+                    "--unsafe-dual-init",
+                    str(INITIAL_UNSAFE_DUAL),
+                    "--overabstain-dual-init",
+                    str(INITIAL_OVERABSTAIN_DUAL),
+                    "--unsafe-dual-lr",
+                    str(UNSAFE_DUAL_LR),
+                    "--overabstain-dual-lr",
+                    str(OVERABSTAIN_DUAL_LR),
+                    "--hard-risk-threshold",
+                    str(HARD_RISK_SHIELD),
                 ]
+                if stage6_controller_dir is not None:
+                    cmd.extend(["--stage6-controller-path", str(stage6_controller_dir)])
+                maybe_add_flag(cmd, "--clean-splitting", CLEAN_SPLITTING)
                 maybe_add_arg(cmd, "--max-train-samples", max_train_samples)
                 maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                maybe_add_arg(cmd, "--max-test-samples", max_eval_samples if CLEAN_SPLITTING else None)
                 return cmd
 
 
@@ -3761,13 +3853,13 @@ def stage8_config_code() -> str:
                 control_eval_path: Path,
                 output_path: Path,
                 *,
-                max_train_samples: int | None,
+                stage6_controller_dir: Path | None,
                 max_eval_samples: int | None,
             ) -> list[str]:
                 cmd = [
                     sys.executable,
                     "-m",
-                    "keelnet.hybrid",
+                    "keelnet.action",
                     "evaluate",
                     "--model-path",
                     str(model_dir),
@@ -3779,17 +3871,22 @@ def stage8_config_code() -> str:
                     str(output_path),
                     "--eval-batch-size",
                     str(EVAL_BATCH_SIZE),
-                    "--candidate-threshold-min",
-                    str(CANDIDATE_THRESHOLD_MIN),
-                    "--candidate-threshold-max",
-                    str(CANDIDATE_THRESHOLD_MAX),
-                    "--candidate-threshold-step",
-                    str(CANDIDATE_THRESHOLD_STEP),
+                    "--risk-threshold-min",
+                    str(RISK_THRESHOLD_MIN),
+                    "--risk-threshold-max",
+                    str(RISK_THRESHOLD_MAX),
+                    "--risk-threshold-step",
+                    str(RISK_THRESHOLD_STEP),
                     "--max-unsupported-answer-rate",
                     str(MAX_UNSUPPORTED_ANSWER_RATE),
+                    "--max-overabstain-rate",
+                    str(MAX_OVERABSTAIN_RATE),
                 ]
-                maybe_add_arg(cmd, "--max-train-samples", max_train_samples)
+                if stage6_controller_dir is not None:
+                    cmd.extend(["--stage6-controller-path", str(stage6_controller_dir)])
+                maybe_add_flag(cmd, "--clean-splitting", CLEAN_SPLITTING)
                 maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                maybe_add_arg(cmd, "--max-test-samples", max_eval_samples if CLEAN_SPLITTING else None)
                 return cmd
 
 
@@ -3803,6 +3900,7 @@ def stage8_config_code() -> str:
                     STAGE5_MODEL_DIR,
                     CONTROL_EVAL_PATH,
                     smoke_model_dir,
+                    stage6_controller_dir=STAGE6_BALANCER_DIR,
                     max_train_samples=SMOKE_TEST_TRAIN_SAMPLES,
                     max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
                     num_train_epochs=SMOKE_TEST_EPOCHS,
@@ -3812,23 +3910,24 @@ def stage8_config_code() -> str:
                     STAGE5_MODEL_DIR,
                     CONTROL_EVAL_PATH,
                     smoke_eval_path,
-                    max_train_samples=SMOKE_TEST_TRAIN_SAMPLES,
+                    stage6_controller_dir=STAGE6_BALANCER_DIR,
                     max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
                 )
                 stage_train_command = build_train_command(
                     STAGE5_MODEL_DIR,
                     CONTROL_EVAL_PATH,
                     HYBRID_DIR,
+                    stage6_controller_dir=STAGE6_BALANCER_DIR,
                     max_train_samples=MAX_TRAIN_SAMPLES,
                     max_eval_samples=MAX_EVAL_SAMPLES,
-                    num_train_epochs=CONTROLLER_EPOCHS,
+                    num_train_epochs=ACTION_EPOCHS,
                 )
                 stage_eval_command = build_eval_command(
                     HYBRID_DIR,
                     STAGE5_MODEL_DIR,
                     CONTROL_EVAL_PATH,
                     HYBRID_EVAL,
-                    max_train_samples=MAX_TRAIN_SAMPLES,
+                    stage6_controller_dir=STAGE6_BALANCER_DIR,
                     max_eval_samples=MAX_EVAL_SAMPLES,
                 )
                 SMOKE_TEST_COMMANDS = [smoke_train_command, smoke_eval_command]
@@ -3845,6 +3944,7 @@ def stage8_config_code() -> str:
                         f"project_storage_dir={PROJECT_STORAGE_DIR}",
                         f"git_branch={CURRENT_BRANCH}",
                         f"stage5_model_dir={STAGE5_MODEL_DIR}",
+                        f"stage6_balancer_dir={STAGE6_BALANCER_DIR}",
                         f"control_eval_path={CONTROL_EVAL_PATH}",
                         f"comparison_baseline_eval_path={COMPARISON_BASELINE_EVAL_PATH}",
                         "status=configured",
@@ -3866,11 +3966,14 @@ def stage8_config_code() -> str:
             print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
             print(f"Run marker file: {RUN_MARKER_FILE}")
             print(f"Stage 5 model dir: {STAGE5_MODEL_DIR}")
+            print(f"Stage 6 balancer dir: {STAGE6_BALANCER_DIR}")
             print(f"Stage 4 control eval path: {CONTROL_EVAL_PATH}")
             print(f"Comparison baseline eval path: {COMPARISON_BASELINE_EVAL_PATH}")
-            print(f"Planned hybrid controller dir: {HYBRID_DIR}")
-            print(f"Planned hybrid eval file: {HYBRID_EVAL}")
+            print(f"Planned Stage 8.2 model dir: {HYBRID_DIR}")
+            print(f"Planned Stage 8.2 eval file: {HYBRID_EVAL}")
             print(f"Max unsupported-answer rate: {MAX_UNSUPPORTED_ANSWER_RATE}")
+            print(f"Max over-abstain rate: {MAX_OVERABSTAIN_RATE}")
+            print(f"Hard risk shield: {HARD_RISK_SHIELD}")
             print(f"CUDA available: {torch.cuda.is_available()}")
             if torch.cuda.is_available():
                 print(f"GPU: {torch.cuda.get_device_name(0)}")
@@ -3879,6 +3982,8 @@ def stage8_config_code() -> str:
 
             if STAGE5_MODEL_DIR is None:
                 print("Set STAGE5_MODEL_DIR before running Stage 8.")
+            if STAGE6_BALANCER_DIR is None:
+                print("Stage 6 balancer not found. Stage 8.2 will still run, but without the Stage 6 prior feature.")
             if CONTROL_EVAL_PATH is None:
                 print("Set CONTROL_EVAL_PATH before running Stage 8.")
             """
@@ -4499,25 +4604,25 @@ GENERIC_STAGES = [
         "save_code": stage7_save_code(),
     },
     {
-        "path": REPO_ROOT / "stages/08-joint-optimization/notebooks/stage-08-joint-optimization-colab.ipynb",
+        "path": REPO_ROOT / "stages/08-joint-optimization/notebooks/stage-08-2-action-learner-calibrated-support-colab.ipynb",
         "branch": "main",
         "stage_number": 8,
-        "stage_label": "Stage 8: Hybrid Stage 5 Plus Calibrated Control",
-        "objective": "Use Stage 5 as the answer engine, then add a calibrated Stage 4-style safety controller on top to recover a better grounded trade-off.",
+        "stage_label": "Stage 8.2: Action Learner + Calibrated Support",
+        "objective": "Use Stage 5 as the answer engine, inject calibrated Stage 4 support into a Stage 7-style action learner, and test the cleaned joined decision policy on an untouched final split.",
         "metrics": [
             "overall F1",
             "answerable F1",
             "unsupported-answer rate",
             "supported-answer rate",
             "answer rate",
-            "comparison against Stage 4 and Stage 5",
+            "comparison against Stage 5 and Stage 7",
         ],
         "hints": [
-            "input: frozen Stage 5 candidate answers plus the Stage 4 calibrated control artifact",
-            "output: a lightweight hybrid controller with a hard calibrated support shield",
-            "success means a better answer-quality versus groundedness balance than raw Stage 5",
+            "input: frozen Stage 5 candidate answers plus the Stage 4 calibrated control artifact and optional Stage 6 prior",
+            "output: a risk-budgeted action learner with a hard calibrated support shield",
+            "success means a better answer-quality versus groundedness balance than raw Stage 5 and plain Stage 7",
         ],
-        "modules": ["keelnet.hybrid", "keelnet.learn", "keelnet.control", "keelnet.verify", "keelnet.metrics"],
+        "modules": ["keelnet.action", "keelnet.learn", "keelnet.control", "keelnet.verify", "keelnet.metrics"],
         "template_path": DEFAULT_GENERIC_NOTEBOOK_TEMPLATE,
         "notes_markdown": (
             dedent(
@@ -4526,18 +4631,19 @@ GENERIC_STAGES = [
 
                 ### Goal
 
-                Treat Stage 5 as the strong answer proposer, then let a calibrated safety controller decide whether that answer is grounded enough to keep.
+                Treat Stage 5 as the strong answer proposer, then let a calibrated action learner decide among answer candidates and abstain.
 
                 ### Scope
 
-                - input: frozen Stage 5 candidate answers plus the Stage 4 calibrated control artifact
+                - input: frozen Stage 5 candidate answers plus the Stage 4 calibrated control artifact and optional Stage 6 prior
                 - output: answer or `ABSTAIN`
-                - comparison: raw Stage 5 learner versus hybrid Stage 5 plus control
+                - comparison: raw Stage 5 learner versus Stage 7 versus joined Stage 8.2
 
                 ### Main Change
 
                 - keep Stage 5 fixed for answer capability
-                - add a lightweight control layer trained on top of Stage 5 candidate features
+                - replace the lightweight final controller with a Stage 7-style action learner
+                - inject calibrated Stage 4 support directly into the decision learner
                 - keep a hard calibrated support shield at inference
 
                 ### Main Metrics
@@ -4551,13 +4657,13 @@ GENERIC_STAGES = [
 
                 ### What This Stage Validates
 
-                - the best current learner benefits from a modular safety layer instead of replacing it
+                - the best current learner benefits from calibrated support inside the decision learner, not only after it
                 - calibrated support information still adds value when Stage 5 already proposes strong answers
-                - the hybrid path is a better practical frontier than raw direct learning alone
+                - the joined action path is a better practical frontier than raw direct learning alone
 
                 ### Handoff Condition
 
-                Do not call Stage 8 successful unless it clearly improves the Stage 5 trade-off without collapsing into Stage 4-style over-conservatism.
+                Do not call Stage 8.2 successful unless it clearly improves the Stage 5 and Stage 7 trade-off without collapsing into Stage 4-style over-conservatism.
                 """
             ).strip()
             + "\n"
@@ -4567,9 +4673,9 @@ GENERIC_STAGES = [
                 """
                 <h2 style="color: #1d4ed8;">2. Configure The Run</h2>
 
-                Set `AUTHOR_NAME` to your name. This notebook builds the stage-specific `RUN_NAME` automatically as `yourname-stage8-v1`, `yourname-stage8-v2`, `yourname-stage8-v3`, and so on based on completed runs.
+                Set `AUTHOR_NAME` to your name. This notebook builds the stage-specific `RUN_NAME` automatically as `yourname-stage8-2-v1`, `yourname-stage8-2-v2`, `yourname-stage8-2-v3`, and so on based on completed runs.
 
-                This notebook tries to auto-fill `STAGE5_MODEL_DIR` from the latest completed Stage 5 run and `CONTROL_EVAL_PATH` from the latest completed Stage 4 run under the current artifact root. It also tries to auto-fill `COMPARISON_BASELINE_EVAL_PATH` from Stage 4 first, then Stage 5.
+                This notebook tries to auto-fill `STAGE5_MODEL_DIR` from the latest completed Stage 5 run, `STAGE6_BALANCER_DIR` from the latest completed Stage 6 run, and `CONTROL_EVAL_PATH` from the latest completed Stage 4 run under the current artifact root. It also tries to auto-fill `COMPARISON_BASELINE_EVAL_PATH` from Stage 7 first, then Stage 5.
 
                 The config cell prepares the upstream paths and default Stage 8 train/evaluate commands automatically. Review the printed paths, thresholds, and command lists before launching a full Colab run.
                 """
@@ -4588,20 +4694,21 @@ GENERIC_STAGES = [
         ),
         "implementation_banner": implementation_banner(
             8,
-            "run the new <code>keelnet.hybrid</code> path to freeze Stage 5, rescore its candidates with the calibrated verifier from Stage 4, and train a lightweight final safety controller.",
-            "the hybrid system beats raw Stage 5 on grounded trade-off quality and stays competitive with the strongest modular baseline.",
+            "run the new <code>keelnet.action</code> path to freeze Stage 5, inject calibrated verifier support from Stage 4, and train the decision learner on top.",
+            "the joined action system beats raw Stage 5 and improves on plain Stage 7 under the cleaned split protocol.",
             "retraining Stage 5 end to end again, renaming Stage 5 thresholds as a new method, broad hallucination claims.",
         ),
         "implementation_markdown": (
             dedent(
                 """
-                ## IMPLEMENTATION 1: Train And Evaluate The Stage 8 Hybrid Controller
+                ## IMPLEMENTATION 1: Train And Evaluate The Stage 8.2 Action Learner
 
-                This is the main Stage 8 run section. The default commands now use the real hybrid path, which combines:
+                This is the main Stage 8 run section. The default commands now use the joined v2 path, which combines:
 
                 - a frozen Stage 5 answer engine
-                - candidate rescoring with the calibrated Stage 4 verifier
-                - a lightweight final keep/abstain controller
+                - calibrated Stage 4 verifier support as the learner's groundedness signal
+                - the Stage 7 action learner over answer candidates and abstain
+                - an optional Stage 6 prior feature
                 - a hard calibrated support shield at inference
 
                 Use the smoke test first if you want a quick wiring check, then run the full train and evaluate commands here.
@@ -4614,7 +4721,7 @@ GENERIC_STAGES = [
                 """
                 <h2 style="color: #15803d;">Save Notes And Review Artifacts</h2>
 
-                This cell creates teammate-friendly note files inside the current run folder and lists the current artifacts. Update the generated notes as you learn what does and does not work in Stage 8: Hybrid Stage 5 Plus Calibrated Control.
+                This cell creates teammate-friendly note files inside the current run folder and lists the current artifacts. Update the generated notes as you learn what does and does not work in Stage 8.2: Action Learner + Calibrated Support.
                 """
             ).strip()
             + "\n"
@@ -4624,16 +4731,16 @@ GENERIC_STAGES = [
                 """
                 <h2 style="color: #15803d;">Final Check</h2>
 
-                Stage 8 only matters if the hybrid actually combines the strengths of both paths.
+                Stage 8.2 only matters if the joined action learner actually combines the strengths of both paths.
 
                 Check all four:
 
                 - Stage 5 answer quality remains meaningfully strong
                 - unsupported answers go down compared with raw Stage 5
                 - the gain is not just over-abstention or a tiny threshold trick
-                - the hybrid frontier is easier to defend than either path alone
+                - the joined action frontier is easier to defend than either path alone
 
-                If those are not true yet, Stage 8 is still a design sketch instead of a convincing wrap-up stage.
+                If those are not true yet, Stage 8.2 is still an experiment, not a convincing wrap-up stage.
                 """
             ).strip()
             + "\n"
@@ -4645,7 +4752,7 @@ GENERIC_STAGES = [
 
                 This cell prints a minimal share-ready summary for teammates, saves it into the current run folder, and marks the run as completed so the next run becomes the next version.
 
-                Use it to capture whether the hybrid is actually stronger than raw Stage 5 and whether the safety shield is doing useful work.
+                Use it to capture whether the joined action learner is actually stronger than raw Stage 5 and plain Stage 7, and whether the safety shield is doing useful work.
                 """
             ).strip()
             + "\n"
@@ -4974,6 +5081,9 @@ def final_comparison_config_code() -> str:
             STAGE8_HYBRID_EVAL_PATH = normalize_optional_path(
                 default_upstream_path("stage8_colab", "hybrid_eval.json", preferred_run_prefix=f"{AUTHOR_NAME}-stage8")
             )
+            STAGE8_2_ACTION_EVAL_PATH = normalize_optional_path(
+                default_upstream_path("stage8_2_colab", "hybrid_eval.json", preferred_run_prefix=f"{AUTHOR_NAME}-stage8-2")
+            )
 
             COMPARISON_STAGE_SPECS = [
                 {
@@ -5007,9 +5117,14 @@ def final_comparison_config_code() -> str:
                     "eval_path": STAGE7_ACTION_EVAL_PATH,
                 },
                 {
-                    "label": "Stage 8 Hybrid Control",
+                    "label": "Stage 8 Hybrid",
                     "family": "stage8",
                     "eval_path": STAGE8_HYBRID_EVAL_PATH,
+                },
+                {
+                    "label": "Stage 8.2 Action + Calibrated Support",
+                    "family": "stage8_2",
+                    "eval_path": STAGE8_2_ACTION_EVAL_PATH,
                 },
             ]
 
@@ -5041,6 +5156,7 @@ def final_comparison_config_code() -> str:
                         f"stage6_balance_eval_path={STAGE6_BALANCE_EVAL_PATH}",
                         f"stage7_action_eval_path={STAGE7_ACTION_EVAL_PATH}",
                         f"stage8_hybrid_eval_path={STAGE8_HYBRID_EVAL_PATH}",
+                        f"stage8_2_action_eval_path={STAGE8_2_ACTION_EVAL_PATH}",
                         "status=configured",
                     ]
                 )
@@ -5104,7 +5220,11 @@ def final_comparison_implementation_code() -> str:
             from pathlib import Path
 
             import matplotlib.pyplot as plt
+            import numpy as np
             import pandas as pd
+            from matplotlib.lines import Line2D
+            from matplotlib.patches import Patch
+            from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
             try:
                 plt.style.use("seaborn-v0_8-whitegrid")
@@ -5151,18 +5271,23 @@ def final_comparison_implementation_code() -> str:
                     mix = payload.get("dev_mix", {}) or {}
                     selected_operating_point = payload.get("selected_keep_threshold")
                 elif family == "stage6":
-                    metrics = payload.get("dev_metrics", {}) or {}
-                    mix = payload.get("dev_mix", {}) or {}
-                    selected_operating_point = payload.get("selected_threshold")
+                    metrics = payload.get("final_metrics", {}) or payload.get("dev_metrics", {}) or payload.get("test_metrics", {}) or {}
+                    mix = payload.get("final_mix", {}) or payload.get("dev_mix", {}) or payload.get("test_mix", {}) or {}
+                    selected_operating_point = payload.get("selected_candidate_threshold") or payload.get("selected_threshold")
                 elif family == "stage7":
-                    metrics = payload.get("dev_metrics", {}) or {}
-                    mix = payload.get("dev_mix", {}) or {}
-                    overabstain = payload.get("dev_overabstain", {}) or {}
+                    metrics = payload.get("final_metrics", {}) or payload.get("dev_metrics", {}) or payload.get("test_metrics", {}) or {}
+                    mix = payload.get("final_mix", {}) or payload.get("dev_mix", {}) or payload.get("test_mix", {}) or {}
+                    overabstain = (
+                        payload.get("final_overabstain", {})
+                        or payload.get("dev_overabstain", {})
+                        or payload.get("test_overabstain", {})
+                        or {}
+                    )
                     selected_operating_point = payload.get("selected_risk_threshold")
-                elif family == "stage8":
-                    metrics = payload.get("dev_metrics", {}) or {}
-                    mix = payload.get("dev_mix", {}) or {}
-                    selected_operating_point = payload.get("selected_candidate_threshold")
+                elif family in {"stage8", "stage8_2"}:
+                    metrics = payload.get("final_metrics", {}) or payload.get("dev_metrics", {}) or payload.get("test_metrics", {}) or {}
+                    mix = payload.get("final_mix", {}) or payload.get("dev_mix", {}) or payload.get("test_mix", {}) or {}
+                    selected_operating_point = payload.get("selected_risk_threshold") or payload.get("selected_candidate_threshold")
                 else:
                     raise ValueError(f"Unsupported comparison family: {family}")
 
@@ -5170,6 +5295,7 @@ def final_comparison_implementation_code() -> str:
                     "label": spec["label"],
                     "family": family,
                     "source_path": str(spec["eval_path"]),
+                    "evaluation_split": payload.get("final_eval_split", "dev"),
                     "selected_operating_point": selected_operating_point,
                     "overall_f1": metrics.get("overall_f1"),
                     "answerable_f1": metrics.get("answerable_f1"),
@@ -5242,60 +5368,173 @@ def final_comparison_implementation_code() -> str:
                 "stage6": "#7c3aed",
                 "stage7": "#059669",
                 "stage8": "#ea580c",
+                "stage8_2": "#f59e0b",
             }
+            family_display_names = {
+                "stage1": "Stage 1 variants",
+                "stage4": "Stage 4 fixed control",
+                "stage5": "Stage 5 learner",
+                "stage6": "Stage 6 adaptive balance",
+                "stage7": "Stage 7 action learner",
+                "stage8": "Stage 8 hybrid",
+                "stage8_2": "Stage 8.2 joined action",
+            }
+            markers = {
+                "stage1": "o",
+                "stage4": "s",
+                "stage5": "^",
+                "stage6": "D",
+                "stage7": "P",
+                "stage8": "X",
+                "stage8_2": "*",
+            }
+            short_labels = {
+                "Stage 1 Baseline": "S1 base",
+                "Stage 1 Abstain": "S1 abs",
+                "Stage 4 Fixed Control": "S4",
+                "Stage 5 Learner": "S5",
+                "Stage 6 Adaptive Balance": "S6",
+                "Stage 7 Action Learner": "S7",
+                "Stage 8 Hybrid": "S8",
+                "Stage 8.2 Action + Calibrated Support": "S8.2",
+            }
+            budget_color = "#ef4444"
+            budget_fill = "#fee2e2"
 
 
-            def _annotate_points(ax, frame: pd.DataFrame, *, x: str, y: str) -> None:
-                for _, row in frame.iterrows():
-                    if pd.isna(row[x]) or pd.isna(row[y]):
-                        continue
-                    ax.annotate(
-                        str(row["label"]),
-                        (row[x], row[y]),
-                        textcoords="offset points",
-                        xytext=(5, 5),
-                        fontsize=9,
+            def _short_label(label: str) -> str:
+                return short_labels.get(str(label), str(label))
+
+
+            def _family_legend_handles(*, include_budget_line: bool = False, include_budget_wall: bool = False) -> list:
+                handles = [
+                    Line2D(
+                        [0],
+                        [0],
+                        marker=markers.get(family, "o"),
+                        linestyle="",
+                        markerfacecolor=colors.get(family, "#111827"),
+                        markeredgecolor="#111827",
+                        markeredgewidth=0.8,
+                        markersize=8,
+                        label=family_display_names.get(family, family),
                     )
+                    for family in colors
+                ]
+                if include_budget_line:
+                    handles.append(
+                        Line2D(
+                            [0],
+                            [0],
+                            color=budget_color,
+                            linestyle="--",
+                            linewidth=1.5,
+                            label="20% unsupported-answer budget",
+                        )
+                    )
+                if include_budget_wall:
+                    handles.append(
+                        Patch(
+                            facecolor=budget_fill,
+                            edgecolor=budget_color,
+                            alpha=0.18,
+                            label="20% budget wall",
+                        )
+                    )
+                return handles
+
+
+            def _scatter_by_family(ax, frame: pd.DataFrame, *, x: str, y: str, z: str | None = None, size: int = 120) -> None:
+                for family, family_df in frame.groupby("family", sort=False):
+                    scatter_kwargs = {
+                        "s": size,
+                        "c": colors.get(family, "#111827"),
+                        "marker": markers.get(family, "o"),
+                        "edgecolors": "#111827",
+                        "linewidths": 0.8,
+                        "alpha": 0.95,
+                    }
+                    if z is None:
+                        ax.scatter(family_df[x], family_df[y], **scatter_kwargs)
+                    else:
+                        ax.scatter(family_df[x], family_df[y], family_df[z], depthshade=False, **scatter_kwargs)
+
+
+            def _annotate_points(ax, frame: pd.DataFrame, *, x: str, y: str, z: str | None = None) -> None:
+                for _, row in frame.iterrows():
+                    if pd.isna(row[x]) or pd.isna(row[y]) or (z is not None and pd.isna(row[z])):
+                        continue
+                    if z is None:
+                        ax.annotate(
+                            _short_label(str(row["label"])),
+                            (row[x], row[y]),
+                            textcoords="offset points",
+                            xytext=(6, 6),
+                            fontsize=8.5,
+                            bbox={
+                                "boxstyle": "round,pad=0.18",
+                                "facecolor": "white",
+                                "edgecolor": "none",
+                                "alpha": 0.75,
+                            },
+                        )
+                    else:
+                        ax.text(
+                            float(row[x]) + 0.15,
+                            float(row[y]) + 0.05,
+                            float(row[z]) + 0.05,
+                            _short_label(str(row["label"])),
+                            fontsize=8,
+                        )
 
 
             overall_vs_unsupported_path = FIGURES_DIR / "overall-f1-vs-unsupported-answer-rate.png"
             answerable_vs_unsupported_path = FIGURES_DIR / "answerable-f1-vs-unsupported-answer-rate.png"
             summary_bar_path = FIGURES_DIR / "summary-metrics-bar-chart.png"
             support_mix_path = FIGURES_DIR / "answer-rate-vs-supported-answer-rate.png"
+            three_metric_frontier_path = FIGURES_DIR / "three-metric-frontier-3d.png"
 
             scatter_df = comparison_df.dropna(subset=["overall_f1", "unsupported_answer_rate"]).copy()
-            fig, ax = plt.subplots(figsize=(9, 6))
-            ax.scatter(
-                scatter_df["unsupported_answer_rate"],
-                scatter_df["overall_f1"],
-                s=80,
-                c=[colors.get(family, "#111827") for family in scatter_df["family"]],
-            )
+            fig, ax = plt.subplots(figsize=(10.5, 6.5))
+            if not scatter_df.empty:
+                unsafe_limit = float(scatter_df["unsupported_answer_rate"].max()) + 1.5
+                ax.axvspan(20.0, unsafe_limit, color=budget_fill, alpha=0.35, zorder=0)
+            _scatter_by_family(ax, scatter_df, x="unsupported_answer_rate", y="overall_f1")
             _annotate_points(ax, scatter_df, x="unsupported_answer_rate", y="overall_f1")
             ax.set_title("Overall F1 vs Unsupported-Answer Rate")
             ax.set_xlabel("Unsupported-Answer Rate (%)")
             ax.set_ylabel("Overall F1")
-            ax.axvline(20.0, color="#ef4444", linestyle="--", linewidth=1.2, label="20% budget")
-            ax.legend(loc="best")
-            fig.tight_layout()
+            ax.axvline(20.0, color=budget_color, linestyle="--", linewidth=1.4)
+            ax.legend(
+                handles=_family_legend_handles(include_budget_line=True),
+                title="System family",
+                loc="upper left",
+                bbox_to_anchor=(1.02, 1.0),
+                borderaxespad=0.0,
+            )
+            fig.tight_layout(rect=(0.0, 0.0, 0.8, 1.0))
             fig.savefig(overall_vs_unsupported_path, dpi=200, bbox_inches="tight")
             plt.close(fig)
 
             scatter_df = comparison_df.dropna(subset=["answerable_f1", "unsupported_answer_rate"]).copy()
-            fig, ax = plt.subplots(figsize=(9, 6))
-            ax.scatter(
-                scatter_df["unsupported_answer_rate"],
-                scatter_df["answerable_f1"],
-                s=80,
-                c=[colors.get(family, "#111827") for family in scatter_df["family"]],
-            )
+            fig, ax = plt.subplots(figsize=(10.5, 6.5))
+            if not scatter_df.empty:
+                unsafe_limit = float(scatter_df["unsupported_answer_rate"].max()) + 1.5
+                ax.axvspan(20.0, unsafe_limit, color=budget_fill, alpha=0.35, zorder=0)
+            _scatter_by_family(ax, scatter_df, x="unsupported_answer_rate", y="answerable_f1")
             _annotate_points(ax, scatter_df, x="unsupported_answer_rate", y="answerable_f1")
             ax.set_title("Answerable F1 vs Unsupported-Answer Rate")
             ax.set_xlabel("Unsupported-Answer Rate (%)")
             ax.set_ylabel("Answerable F1")
-            ax.axvline(20.0, color="#ef4444", linestyle="--", linewidth=1.2, label="20% budget")
-            ax.legend(loc="best")
-            fig.tight_layout()
+            ax.axvline(20.0, color=budget_color, linestyle="--", linewidth=1.4)
+            ax.legend(
+                handles=_family_legend_handles(include_budget_line=True),
+                title="System family",
+                loc="upper left",
+                bbox_to_anchor=(1.02, 1.0),
+                borderaxespad=0.0,
+            )
+            fig.tight_layout(rect=(0.0, 0.0, 0.8, 1.0))
             fig.savefig(answerable_vs_unsupported_path, dpi=200, bbox_inches="tight")
             plt.close(fig)
 
@@ -5303,38 +5542,94 @@ def final_comparison_implementation_code() -> str:
             fig, axes = plt.subplots(2, 2, figsize=(12, 8))
             for axis, metric in zip(axes.flat, bar_metrics, strict=False):
                 metric_df = comparison_df.dropna(subset=[metric]).copy()
-                axis.bar(
+                bars = axis.bar(
                     metric_df["label"].astype(str),
                     metric_df[metric],
                     color=[colors.get(family, "#111827") for family in metric_df["family"]],
                 )
                 axis.set_title(metric.replace("_", " ").title())
-                axis.tick_params(axis="x", rotation=30)
+                axis.tick_params(axis="x", rotation=28)
+                axis.bar_label(bars, fmt="%.2f", padding=3, fontsize=8)
                 if metric == "unsupported_answer_rate":
-                    axis.axhline(20.0, color="#ef4444", linestyle="--", linewidth=1.2)
+                    axis.axhline(20.0, color=budget_color, linestyle="--", linewidth=1.4)
             fig.tight_layout()
             fig.savefig(summary_bar_path, dpi=200, bbox_inches="tight")
             plt.close(fig)
 
             support_df = comparison_df.dropna(subset=["answer_rate", "supported_answer_rate"]).copy()
             if not support_df.empty:
-                fig, ax = plt.subplots(figsize=(9, 6))
-                ax.scatter(
-                    support_df["answer_rate"],
-                    support_df["supported_answer_rate"],
-                    s=80,
-                    c=[colors.get(family, "#111827") for family in support_df["family"]],
-                )
+                fig, ax = plt.subplots(figsize=(10.5, 6.5))
+                _scatter_by_family(ax, support_df, x="answer_rate", y="supported_answer_rate")
                 _annotate_points(ax, support_df, x="answer_rate", y="supported_answer_rate")
                 ax.set_title("Answer Rate vs Supported-Answer Rate")
                 ax.set_xlabel("Answer Rate (%)")
                 ax.set_ylabel("Supported-Answer Rate (%)")
-                fig.tight_layout()
+                ax.legend(
+                    handles=_family_legend_handles(),
+                    title="System family",
+                    loc="upper left",
+                    bbox_to_anchor=(1.02, 1.0),
+                    borderaxespad=0.0,
+                )
+                fig.tight_layout(rect=(0.0, 0.0, 0.8, 1.0))
                 fig.savefig(support_mix_path, dpi=200, bbox_inches="tight")
                 plt.close(fig)
             else:
                 support_mix_path = None
                 print("Support-aware mix plot skipped because no loaded rows expose answer-rate and supported-answer-rate together.")
+
+            three_metric_df = comparison_df.dropna(
+                subset=["unsupported_answer_rate", "overall_f1", "answerable_f1"]
+            ).copy()
+            if not three_metric_df.empty:
+                fig = plt.figure(figsize=(11.5, 8.5))
+                ax = fig.add_subplot(111, projection="3d")
+                _scatter_by_family(
+                    ax,
+                    three_metric_df,
+                    x="unsupported_answer_rate",
+                    y="overall_f1",
+                    z="answerable_f1",
+                    size=130,
+                )
+                y_values = np.linspace(
+                    float(three_metric_df["overall_f1"].min()) - 0.4,
+                    float(three_metric_df["overall_f1"].max()) + 0.4,
+                    2,
+                )
+                z_values = np.linspace(
+                    float(three_metric_df["answerable_f1"].min()) - 0.4,
+                    float(three_metric_df["answerable_f1"].max()) + 0.4,
+                    2,
+                )
+                yy, zz = np.meshgrid(y_values, z_values)
+                xx = np.full_like(yy, 20.0)
+                ax.plot_surface(xx, yy, zz, color=budget_fill, alpha=0.18, linewidth=0.0, shade=False)
+                _annotate_points(
+                    ax,
+                    three_metric_df,
+                    x="unsupported_answer_rate",
+                    y="overall_f1",
+                    z="answerable_f1",
+                )
+                ax.set_title("Three-Metric Frontier")
+                ax.set_xlabel("Unsupported-Answer Rate (%)")
+                ax.set_ylabel("Overall F1")
+                ax.set_zlabel("Answerable F1")
+                ax.view_init(elev=22, azim=-58)
+                ax.legend(
+                    handles=_family_legend_handles(include_budget_wall=True),
+                    title="System family",
+                    loc="upper left",
+                    bbox_to_anchor=(1.02, 1.0),
+                    borderaxespad=0.0,
+                )
+                fig.tight_layout(rect=(0.0, 0.0, 0.8, 1.0))
+                fig.savefig(three_metric_frontier_path, dpi=220, bbox_inches="tight")
+                plt.close(fig)
+            else:
+                three_metric_frontier_path = None
+                print("3D frontier plot skipped because the loaded rows do not share all three core metrics.")
 
             available_figure_paths = [
                 overall_vs_unsupported_path,
@@ -5343,6 +5638,8 @@ def final_comparison_implementation_code() -> str:
             ]
             if support_mix_path is not None:
                 available_figure_paths.append(support_mix_path)
+            if three_metric_frontier_path is not None:
+                available_figure_paths.append(three_metric_frontier_path)
 
             best_overall_row = comparison_df.loc[comparison_df["overall_f1"].astype(float).idxmax()].to_dict()
             safest_row = comparison_df.loc[comparison_df["unsupported_answer_rate"].astype(float).idxmin()].to_dict()
