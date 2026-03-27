@@ -73,6 +73,64 @@ VALIDATE_MARKDOWN = (
     + "\n"
 )
 
+VALIDATE_CODE = (
+    dedent(
+        """
+        from pathlib import Path
+        import re
+
+
+        CONFLICT_MARKER_PATTERN = re.compile(r"^(<<<<<<<|=======|>>>>>>>)", re.MULTILINE)
+
+
+        def _problem_excerpt(path: Path, *, marker_line: int, context_lines: int = 2) -> str:
+            lines = path.read_text(encoding="utf-8").splitlines()
+            start = max(1, marker_line - context_lines)
+            end = min(len(lines), marker_line + context_lines)
+            excerpt_lines = ["--- Start of problematic section ---"]
+            for line_number in range(start, end + 1):
+                excerpt_lines.append(f"{line_number}: {lines[line_number - 1]}")
+            excerpt_lines.append("--- End of problematic section ---")
+            return "\\n".join(excerpt_lines)
+
+
+        def assert_repo_has_no_conflict_markers(repo_dir: Path) -> None:
+            candidate_paths: list[Path] = []
+            candidate = repo_dir / "pyproject.toml"
+            if candidate.exists():
+                candidate_paths.append(candidate)
+
+            for subdir in ("src", "tests"):
+                root = repo_dir / subdir
+                if root.exists():
+                    candidate_paths.extend(sorted(root.rglob("*.py")))
+
+            for path in candidate_paths:
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except UnicodeDecodeError:
+                    continue
+
+                match = CONFLICT_MARKER_PATTERN.search(text)
+                if match is None:
+                    continue
+
+                marker_line = text.count("\\n", 0, match.start()) + 1
+                print(f"ERROR: Found potential Git merge conflict markers in {path} around line {marker_line}:")
+                print(_problem_excerpt(path, marker_line=marker_line))
+                raise RuntimeError(
+                    "Please resolve these Git merge conflicts in the file directly, "
+                    "or rerun the setup cell to refresh /content/KeelNet, then rerun this cell."
+                )
+
+
+        assert_repo_has_no_conflict_markers(REPO_DIR)
+        run([sys.executable, "-m", "unittest", "discover", "-s", str(REPO_DIR / "tests")])
+        """
+    ).strip()
+    + "\n"
+)
+
 STAGE_NOTE_TEMPLATE_MARKDOWN = (
     dedent(
         """
@@ -2790,6 +2848,7 @@ def sync_stage_2() -> None:
     notebook["cells"][3]["source"] = source_lines(setup_code(STAGE_2["branch"]))
     notebook["cells"][4]["source"] = source_lines(STAGE_2["config_markdown"])
     notebook["cells"][6]["source"] = source_lines(VALIDATE_MARKDOWN)
+    notebook["cells"][7]["source"] = source_lines(VALIDATE_CODE)
     notebook["cells"][8]["source"] = source_lines(STAGE_2["smoke_markdown"])
     notebook["cells"][10]["source"] = source_lines(STAGE_2["implementation_banner"])
     notebook["cells"][11]["source"] = source_lines(STAGE_2["implementation_markdown"])
@@ -2822,6 +2881,7 @@ def sync_generic_stage(stage: dict) -> None:
         )
     )
     notebook["cells"][6]["source"] = source_lines(VALIDATE_MARKDOWN)
+    notebook["cells"][7]["source"] = source_lines(VALIDATE_CODE)
     notebook["cells"][8]["source"] = source_lines(stage["smoke_markdown"])
     notebook["cells"][10]["source"] = source_lines(stage["implementation_banner"])
     notebook["cells"][11]["source"] = source_lines(stage["implementation_markdown"])
