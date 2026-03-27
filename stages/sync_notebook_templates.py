@@ -96,9 +96,10 @@ VALIDATE_CODE = (
 
         def assert_repo_has_no_conflict_markers(repo_dir: Path) -> None:
             candidate_paths: list[Path] = []
-            candidate = repo_dir / "pyproject.toml"
-            if candidate.exists():
-                candidate_paths.append(candidate)
+            for relative_path in ("pyproject.toml",):
+                candidate = repo_dir / relative_path
+                if candidate.exists():
+                    candidate_paths.append(candidate)
 
             for subdir in ("src", "tests"):
                 root = repo_dir / subdir
@@ -116,7 +117,9 @@ VALIDATE_CODE = (
                     continue
 
                 marker_line = text.count("\\n", 0, match.start()) + 1
-                print(f"ERROR: Found potential Git merge conflict markers in {path} around line {marker_line}:")
+                print(
+                    f"ERROR: Found potential Git merge conflict markers in {path} around line {marker_line}:"
+                )
                 print(_problem_excerpt(path, marker_line=marker_line))
                 raise RuntimeError(
                     "Please resolve these Git merge conflicts in the file directly, "
@@ -2289,6 +2292,590 @@ def stage5_share_code() -> str:
     )
 
 
+def stage6_config_code() -> str:
+    return (
+        dedent(
+            """
+            from pathlib import Path
+            import json
+            import re
+            import subprocess
+            import sys
+
+            import torch
+
+            REPO_DIR = Path(REPO_DIR).resolve()
+            PROJECT_STORAGE_DIR = Path(PROJECT_STORAGE_DIR).resolve()
+            DRIVE_PROJECT_DIR = Path(DRIVE_PROJECT_DIR).resolve() if DRIVE_PROJECT_DIR is not None else None
+
+            AUTHOR_NAME = "naufal"
+            RUN_BASENAME = f"{AUTHOR_NAME}-stage6"
+            ARTIFACTS_ROOT = PROJECT_STORAGE_DIR / "artifacts" / "stage6_colab"
+            COMPLETION_MARKER_NAME = "RUN_COMPLETED.txt"
+
+            STAGE_TITLE = "Stage 6: Adaptive Constraint Balancing"
+            STAGE_OBJECTIVE = "Only if needed, beat the strongest earlier fixed or constrained baseline by adapting Stage 5 candidate selection under the unsupported-answer budget."
+            TARGET_METRICS = [
+                "overall F1",
+                "answerable F1",
+                "unsupported-answer rate",
+                "supported-answer rate",
+                "abstain F1",
+            ]
+            IMPLEMENTATION_HINTS = [
+                "input: candidate spans and keep/support signals from the Stage 5 learner",
+                "output: a learned adaptive controller that can abstain under budget",
+                "compare against the strongest available Stage 4 or Stage 5 baseline",
+            ]
+            SUGGESTED_MODULES = ["keelnet.balance", "keelnet.learn", "keelnet.metrics"]
+
+
+            def completed_versions(root: Path, run_basename: str) -> list[int]:
+                versions: list[int] = []
+                if not root.exists():
+                    return versions
+
+                pattern = re.compile(rf"^{re.escape(run_basename)}-v(\\d+)$")
+                for child in root.iterdir():
+                    if not child.is_dir():
+                        continue
+                    match = pattern.match(child.name)
+                    if match and (child / COMPLETION_MARKER_NAME).exists():
+                        versions.append(int(match.group(1)))
+                return sorted(versions)
+
+
+            def completed_run_dirs(root: Path, *, run_prefix: str | None = None) -> list[Path]:
+                if not root.exists():
+                    return []
+
+                pattern = re.compile(rf"^{re.escape(run_prefix)}-v(\\d+)$") if run_prefix is not None else None
+                runs: list[Path] = []
+                for child in root.iterdir():
+                    if not child.is_dir():
+                        continue
+                    if not (child / COMPLETION_MARKER_NAME).exists():
+                        continue
+                    if pattern is not None and not pattern.match(child.name):
+                        continue
+                    runs.append(child)
+                return sorted(runs, key=lambda path: (path.stat().st_mtime, path.name))
+
+
+            def default_upstream_path(stage_folder: str, relative_path: str, *, preferred_run_prefix: str | None = None) -> str | None:
+                stage_root = PROJECT_STORAGE_DIR / "artifacts" / stage_folder
+                ordered_runs: list[Path] = []
+
+                if preferred_run_prefix is not None:
+                    ordered_runs.extend(reversed(completed_run_dirs(stage_root, run_prefix=preferred_run_prefix)))
+
+                for run_dir in reversed(completed_run_dirs(stage_root)):
+                    if run_dir not in ordered_runs:
+                        ordered_runs.append(run_dir)
+
+                relative = Path(relative_path)
+                for run_dir in ordered_runs:
+                    candidate = run_dir / relative
+                    if candidate.exists():
+                        return str(candidate)
+                return None
+
+
+            RUN_VERSION = max(completed_versions(ARTIFACTS_ROOT, RUN_BASENAME), default=0) + 1
+            RUN_NAME = f"{RUN_BASENAME}-v{RUN_VERSION}"
+            OUTPUT_ROOT = ARTIFACTS_ROOT / RUN_NAME
+            OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+            RUN_MARKER_FILE = OUTPUT_ROOT / "RUN_STARTED.txt"
+            RUN_NOTES_FILE = OUTPUT_ROOT / "run-notes-template.md"
+            RUN_SUMMARY_FILE = OUTPUT_ROOT / "run-summary.json"
+            COMPLETION_MARKER_FILE = OUTPUT_ROOT / COMPLETION_MARKER_NAME
+
+            __NOTEBOOK_ARCHIVE_CONFIG_CODE__
+
+            DEFAULT_STAGE5_MODEL_DIR = default_upstream_path(
+                "stage5_colab",
+                "learner",
+                preferred_run_prefix=f"{AUTHOR_NAME}-stage5",
+            )
+            DEFAULT_STAGE5_EVAL = default_upstream_path(
+                "stage5_colab",
+                "learner_eval.json",
+                preferred_run_prefix=f"{AUTHOR_NAME}-stage5",
+            )
+            DEFAULT_STAGE4_CONTROL_EVAL = default_upstream_path(
+                "stage4_colab",
+                "control_eval.json",
+                preferred_run_prefix=f"{AUTHOR_NAME}-stage4",
+            )
+            STAGE5_MODEL_DIR = DEFAULT_STAGE5_MODEL_DIR
+            COMPARISON_BASELINE_EVAL_PATH = DEFAULT_STAGE4_CONTROL_EVAL or DEFAULT_STAGE5_EVAL
+
+            TRAIN_BATCH_SIZE = 64
+            EVAL_BATCH_SIZE = 8
+            CONTROLLER_EPOCHS = 10
+            CONTROLLER_LR = 1e-3
+            CONTROLLER_WEIGHT_DECAY = 0.01
+            HIDDEN_SIZE = 32
+            DROPOUT = 0.10
+            MAX_CANDIDATES_PER_EXAMPLE = 6
+            MAX_CANDIDATES_PER_FEATURE = 3
+            POSITIVE_WEIGHT = 1.0
+            NEGATIVE_WEIGHT_INIT = 1.0
+            NEGATIVE_WEIGHT_MIN = 0.5
+            NEGATIVE_WEIGHT_MAX = 6.0
+            ADAPTIVE_WEIGHT_STEP = 0.5
+            HARD_NEGATIVE_WEIGHT = 1.5
+            MAX_TRAIN_SAMPLES = None
+            MAX_EVAL_SAMPLES = None
+            MAX_UNSUPPORTED_ANSWER_RATE = 20.0
+            CANDIDATE_THRESHOLD_MIN = 0.05
+            CANDIDATE_THRESHOLD_MAX = 0.95
+            CANDIDATE_THRESHOLD_STEP = 0.05
+
+            RUN_SMOKE_TEST = False
+            SMOKE_TEST_TRAIN_SAMPLES = 256
+            SMOKE_TEST_EVAL_SAMPLES = 128
+            SMOKE_TEST_EPOCHS = 2
+
+            BALANCER_DIR = OUTPUT_ROOT / "balancer"
+            BALANCER_EVAL = OUTPUT_ROOT / "balance_eval.json"
+
+            if STAGE5_MODEL_DIR is not None:
+                STAGE5_MODEL_DIR = Path(STAGE5_MODEL_DIR).expanduser().resolve()
+                if not STAGE5_MODEL_DIR.exists():
+                    raise FileNotFoundError(f"Stage 5 model directory not found: {STAGE5_MODEL_DIR}")
+
+            if COMPARISON_BASELINE_EVAL_PATH is not None:
+                COMPARISON_BASELINE_EVAL_PATH = Path(COMPARISON_BASELINE_EVAL_PATH).expanduser().resolve()
+                if not COMPARISON_BASELINE_EVAL_PATH.exists():
+                    raise FileNotFoundError(f"Baseline eval file not found: {COMPARISON_BASELINE_EVAL_PATH}")
+
+
+            def maybe_add_arg(cmd: list[str], flag: str, value: object | None) -> None:
+                if value is None:
+                    return
+                cmd.extend([flag, str(value)])
+
+
+            def build_train_command(
+                stage5_model_dir: Path,
+                output_dir: Path,
+                *,
+                max_train_samples: int | None,
+                max_eval_samples: int | None,
+                num_train_epochs: int,
+            ) -> list[str]:
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "keelnet.balance",
+                    "train",
+                    "--stage5-model-path",
+                    str(stage5_model_dir),
+                    "--output-dir",
+                    str(output_dir),
+                    "--train-batch-size",
+                    str(TRAIN_BATCH_SIZE),
+                    "--eval-batch-size",
+                    str(EVAL_BATCH_SIZE),
+                    "--learning-rate",
+                    str(CONTROLLER_LR),
+                    "--weight-decay",
+                    str(CONTROLLER_WEIGHT_DECAY),
+                    "--num-train-epochs",
+                    str(num_train_epochs),
+                    "--hidden-size",
+                    str(HIDDEN_SIZE),
+                    "--dropout",
+                    str(DROPOUT),
+                    "--max-candidates-per-example",
+                    str(MAX_CANDIDATES_PER_EXAMPLE),
+                    "--max-candidates-per-feature",
+                    str(MAX_CANDIDATES_PER_FEATURE),
+                    "--positive-weight",
+                    str(POSITIVE_WEIGHT),
+                    "--negative-weight-init",
+                    str(NEGATIVE_WEIGHT_INIT),
+                    "--negative-weight-min",
+                    str(NEGATIVE_WEIGHT_MIN),
+                    "--negative-weight-max",
+                    str(NEGATIVE_WEIGHT_MAX),
+                    "--adaptive-weight-step",
+                    str(ADAPTIVE_WEIGHT_STEP),
+                    "--hard-negative-weight",
+                    str(HARD_NEGATIVE_WEIGHT),
+                    "--max-unsupported-answer-rate",
+                    str(MAX_UNSUPPORTED_ANSWER_RATE),
+                ]
+                maybe_add_arg(cmd, "--max-train-samples", max_train_samples)
+                maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                return cmd
+
+
+            def build_eval_command(
+                controller_path: Path,
+                stage5_model_dir: Path,
+                output_path: Path,
+                *,
+                max_eval_samples: int | None,
+            ) -> list[str]:
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "keelnet.balance",
+                    "evaluate",
+                    "--controller-path",
+                    str(controller_path),
+                    "--stage5-model-path",
+                    str(stage5_model_dir),
+                    "--output-path",
+                    str(output_path),
+                    "--eval-batch-size",
+                    str(EVAL_BATCH_SIZE),
+                    "--candidate-threshold-min",
+                    str(CANDIDATE_THRESHOLD_MIN),
+                    "--candidate-threshold-max",
+                    str(CANDIDATE_THRESHOLD_MAX),
+                    "--candidate-threshold-step",
+                    str(CANDIDATE_THRESHOLD_STEP),
+                    "--max-unsupported-answer-rate",
+                    str(MAX_UNSUPPORTED_ANSWER_RATE),
+                ]
+                maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
+                return cmd
+
+
+            if STAGE5_MODEL_DIR is None:
+                SMOKE_TEST_COMMANDS = []
+                STAGE_COMMANDS = []
+            else:
+                smoke_model_dir = OUTPUT_ROOT / "smoke-balancer"
+                smoke_eval_path = OUTPUT_ROOT / "smoke-balance-eval.json"
+                smoke_train_command = build_train_command(
+                    STAGE5_MODEL_DIR,
+                    smoke_model_dir,
+                    max_train_samples=SMOKE_TEST_TRAIN_SAMPLES,
+                    max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
+                    num_train_epochs=SMOKE_TEST_EPOCHS,
+                )
+                smoke_eval_command = build_eval_command(
+                    smoke_model_dir,
+                    STAGE5_MODEL_DIR,
+                    smoke_eval_path,
+                    max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
+                )
+                stage_train_command = build_train_command(
+                    STAGE5_MODEL_DIR,
+                    BALANCER_DIR,
+                    max_train_samples=MAX_TRAIN_SAMPLES,
+                    max_eval_samples=MAX_EVAL_SAMPLES,
+                    num_train_epochs=CONTROLLER_EPOCHS,
+                )
+                stage_eval_command = build_eval_command(
+                    BALANCER_DIR,
+                    STAGE5_MODEL_DIR,
+                    BALANCER_EVAL,
+                    max_eval_samples=MAX_EVAL_SAMPLES,
+                )
+                SMOKE_TEST_COMMANDS = [smoke_train_command, smoke_eval_command]
+                STAGE_COMMANDS = [stage_train_command, stage_eval_command]
+
+            RUN_MARKER_FILE.write_text(
+                "\\n".join(
+                    [
+                        f"stage={STAGE_TITLE}",
+                        f"run_name={RUN_NAME}",
+                        f"run_version=v{RUN_VERSION}",
+                        f"runtime_mode={RUNTIME_MODE}",
+                        f"repo_dir={REPO_DIR}",
+                        f"project_storage_dir={PROJECT_STORAGE_DIR}",
+                        f"git_branch={CURRENT_BRANCH}",
+                        f"stage5_model_dir={STAGE5_MODEL_DIR}",
+                        f"comparison_baseline_eval_path={COMPARISON_BASELINE_EVAL_PATH}",
+                        "status=configured",
+                        "note=This file is created when the config cell runs.",
+                    ]
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+
+            print(f"Runtime mode: {RUNTIME_MODE}")
+            print(f"Repo dir: {REPO_DIR}")
+            print(f"{PROJECT_STORAGE_LABEL}: {PROJECT_STORAGE_DIR}")
+            print(f"Drive project dir: {DRIVE_PROJECT_DIR}")
+            print(f"Artifacts root: {ARTIFACTS_ROOT}")
+            print(f"Run basename: {RUN_BASENAME}")
+            print(f"Run version: v{RUN_VERSION}")
+            print(f"Run output dir: {OUTPUT_ROOT}")
+            print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
+            print(f"Run marker file: {RUN_MARKER_FILE}")
+            print(f"Stage 5 model dir: {STAGE5_MODEL_DIR}")
+            print(f"Comparison baseline eval path: {COMPARISON_BASELINE_EVAL_PATH}")
+            print(f"Balancer dir: {BALANCER_DIR}")
+            print(f"Balancer eval file: {BALANCER_EVAL}")
+            print(f"Max unsupported-answer rate: {MAX_UNSUPPORTED_ANSWER_RATE}")
+            print(f"CUDA available: {torch.cuda.is_available()}")
+            if torch.cuda.is_available():
+                print(f"GPU: {torch.cuda.get_device_name(0)}")
+            print("Target metrics:", ", ".join(TARGET_METRICS))
+            print("Suggested modules:", ", ".join(SUGGESTED_MODULES))
+
+            if STAGE5_MODEL_DIR is None:
+                print("Set STAGE5_MODEL_DIR before running Stage 6.")
+
+
+            def run(cmd):
+                rendered = [str(part) for part in cmd]
+                print("$", " ".join(rendered))
+                with subprocess.Popen(
+                    rendered,
+                    cwd=REPO_DIR,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    bufsize=1,
+                ) as process:
+                    if process.stdout is not None:
+                        for line in process.stdout:
+                            print(line, end="", flush=True)
+                    return_code = process.wait()
+                if return_code != 0:
+                    raise subprocess.CalledProcessError(return_code, rendered)
+
+
+            def run_many(commands, *, label: str) -> bool:
+                if not commands:
+                    print(f"No commands configured for {label} yet.")
+                    return False
+
+                for index, cmd in enumerate(commands, start=1):
+                    print(f"\\n[{label} {index}/{len(commands)}]")
+                    run(cmd)
+                return True
+            """
+        ).replace("__NOTEBOOK_ARCHIVE_CONFIG_CODE__", NOTEBOOK_ARCHIVE_CONFIG_CODE.rstrip()).strip()
+        + "\n"
+    )
+
+
+def stage6_implementation_code() -> str:
+    return (
+        dedent(
+            """
+            if STAGE5_MODEL_DIR is None:
+                print("Set STAGE5_MODEL_DIR in the config cell before running Stage 6.")
+            else:
+                run_many(STAGE_COMMANDS, label="stage command")
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def stage6_save_code() -> str:
+    return (
+        dedent(
+            """
+            captured_notebook_path = save_executed_notebook_snapshot()
+            mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
+
+            if not RUN_NOTES_FILE.exists():
+                metric_lines = [f"- {metric}" for metric in TARGET_METRICS]
+                RUN_NOTES_FILE.write_text(
+                    "\\n".join(
+                        [
+                            f"# {STAGE_TITLE} Notes",
+                            "",
+                            "Update this note three times:",
+                            "1. before implementation: goal, success condition, and commands",
+                            "2. after smoke test: environment issues and command fixes",
+                            "3. after a meaningful run: metrics, verdict, and next actions",
+                            "",
+                            "## Run Info",
+                            f"- Branch: {CURRENT_BRANCH}",
+                            f"- `RUN_NAME`: {RUN_NAME}",
+                            f"- Output folder: {OUTPUT_ROOT}",
+                            f"- Executed notebook archive target: {EXECUTED_NOTEBOOK_PATH}",
+                            f"- Runtime mode: {RUNTIME_MODE}",
+                            "",
+                            "## Goal",
+                            f"- One-sentence objective: {STAGE_OBJECTIVE}",
+                            "- Success condition:",
+                            "- Out of scope:",
+                            "",
+                            "## Commands",
+                            f"- Smoke test command(s): {SMOKE_TEST_COMMANDS}",
+                            f"- Main command(s): {STAGE_COMMANDS}",
+                            f"- Stage 5 model dir: {STAGE5_MODEL_DIR}",
+                            f"- Comparison baseline eval path: {COMPARISON_BASELINE_EVAL_PATH}",
+                            f"- Output files to inspect: {BALANCER_EVAL}",
+                            "",
+                            "## Main Metrics",
+                            *metric_lines,
+                            "",
+                            "## What Changed",
+                            "- ",
+                            "",
+                            "## What Worked",
+                            "- ",
+                            "",
+                            "## What Failed Or Looks Risky",
+                            "- ",
+                            "",
+                            "## Error Cases To Review",
+                            "- ",
+                            "",
+                            "## Decision",
+                            "- Keep, revise, or stop:",
+                            "- Reason:",
+                            "",
+                            "## Next Actions",
+                            "1. ",
+                            "2. ",
+                            "3. ",
+                        ]
+                    )
+                    + "\\n",
+                    encoding="utf-8",
+                )
+
+            RUN_SUMMARY_FILE.write_text(
+                json.dumps(
+                    {
+                        "stage": STAGE_TITLE,
+                        "run_name": RUN_NAME,
+                        "runtime_mode": RUNTIME_MODE,
+                        "git_branch": CURRENT_BRANCH,
+                        "output_root": str(OUTPUT_ROOT),
+                        "drive_project_dir": str(DRIVE_PROJECT_DIR) if DRIVE_PROJECT_DIR is not None else None,
+                        "mirrored_output_root": str(mirrored_output_root) if mirrored_output_root is not None else None,
+                        "executed_notebook_dir": str(NOTEBOOK_ARCHIVE_DIR),
+                        "executed_notebook_target": str(EXECUTED_NOTEBOOK_PATH),
+                        "executed_notebook_saved": captured_notebook_path is not None,
+                        "executed_notebook_instructions_file": str(EXECUTED_NOTEBOOK_INSTRUCTIONS_FILE),
+                        "stage5_model_dir": str(STAGE5_MODEL_DIR) if STAGE5_MODEL_DIR is not None else None,
+                        "balancer_dir": str(BALANCER_DIR),
+                        "balancer_eval": str(BALANCER_EVAL),
+                        "comparison_baseline_eval_path": str(COMPARISON_BASELINE_EVAL_PATH) if COMPARISON_BASELINE_EVAL_PATH is not None else None,
+                        "target_metrics": TARGET_METRICS,
+                        "suggested_modules": SUGGESTED_MODULES,
+                        "max_unsupported_answer_rate": MAX_UNSUPPORTED_ANSWER_RATE,
+                    },
+                    indent=2,
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+
+            print(f"Notes template: {RUN_NOTES_FILE}")
+            print(f"Run summary: {RUN_SUMMARY_FILE}")
+            print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
+            if captured_notebook_path is None:
+                print(
+                    "Automatic notebook capture was unavailable. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
+            if mirrored_output_root is not None:
+                print(f"Drive mirror: {mirrored_output_root}")
+            print("Current files under OUTPUT_ROOT:")
+            for path in sorted(OUTPUT_ROOT.rglob("*")):
+                print(path)
+            """
+        ).strip()
+        + "\n"
+    )
+
+
+def stage6_share_code() -> str:
+    return (
+        dedent(
+            """
+            from datetime import datetime, timezone
+
+            captured_notebook_path = save_executed_notebook_snapshot()
+            mirrored_output_root = mirror_output_root(OUTPUT_ROOT)
+            metric_lines = [f"- {metric}: <fill in after review>" for metric in TARGET_METRICS]
+            if BALANCER_EVAL.exists():
+                balance_results = json.loads(BALANCER_EVAL.read_text(encoding="utf-8"))
+                dev_metrics = balance_results["dev_metrics"]
+                dev_mix = balance_results["dev_mix"]
+                metric_lines = [
+                    f"- Overall F1 (dev): {dev_metrics['overall_f1']:.2f}",
+                    f"- Answerable F1 (dev): {dev_metrics['answerable_f1']:.2f}",
+                    f"- Unsupported-answer rate (dev): {dev_metrics['unsupported_answer_rate']:.2f}",
+                    f"- Abstain F1 (dev): {dev_metrics['abstain_f1']:.2f}",
+                    f"- Supported-answer rate (among answers, dev): {dev_mix['supported_answer_rate']:.2f}",
+                    f"- Answer rate (dev): {dev_mix['answer_rate']:.2f}",
+                    f"- Selected candidate threshold: {balance_results['selected_candidate_threshold']:.2f}",
+                    f"- Max unsupported-answer rate budget: {balance_results['max_unsupported_answer_rate']:.2f}",
+                ]
+                if COMPARISON_BASELINE_EVAL_PATH is not None and COMPARISON_BASELINE_EVAL_PATH.exists():
+                    baseline_results = json.loads(COMPARISON_BASELINE_EVAL_PATH.read_text(encoding="utf-8"))
+                    baseline_metrics = None
+                    baseline_mix = None
+                    if "control_dev_metrics" in baseline_results:
+                        baseline_metrics = baseline_results["control_dev_metrics"]
+                        baseline_mix = baseline_results["control_dev_mix"]
+                    elif "dev_metrics" in baseline_results:
+                        baseline_metrics = baseline_results["dev_metrics"]
+                        baseline_mix = baseline_results["dev_mix"]
+
+                    if baseline_metrics is not None and baseline_mix is not None:
+                        metric_lines = [
+                            f"- Overall F1 (dev): {baseline_metrics['overall_f1']:.2f} -> {dev_metrics['overall_f1']:.2f}",
+                            f"- Answerable F1 (dev): {baseline_metrics['answerable_f1']:.2f} -> {dev_metrics['answerable_f1']:.2f}",
+                            f"- Unsupported-answer rate (dev): {baseline_metrics['unsupported_answer_rate']:.2f} -> {dev_metrics['unsupported_answer_rate']:.2f}",
+                            f"- Abstain F1 (dev): {baseline_metrics['abstain_f1']:.2f} -> {dev_metrics['abstain_f1']:.2f}",
+                            f"- Supported-answer rate (among answers, dev): {baseline_mix['supported_answer_rate']:.2f} -> {dev_mix['supported_answer_rate']:.2f}",
+                            f"- Answer rate (dev): {baseline_mix['answer_rate']:.2f} -> {dev_mix['answer_rate']:.2f}",
+                            f"- Selected candidate threshold: {balance_results['selected_candidate_threshold']:.2f}",
+                            f"- Max unsupported-answer rate budget: {balance_results['max_unsupported_answer_rate']:.2f}",
+                        ]
+
+            share_lines = [
+                f"# {STAGE_TITLE} Share Note",
+                "",
+                f"- runtime mode: {RUNTIME_MODE}",
+                f"- branch name: {CURRENT_BRANCH}",
+                f"- RUN_NAME: {RUN_NAME}",
+                *metric_lines,
+                f"- Output folder path: {OUTPUT_ROOT}",
+                f"- Executed notebook archive target: {EXECUTED_NOTEBOOK_PATH}",
+            ]
+            if mirrored_output_root is not None:
+                share_lines.append(f"- Drive mirror path: {mirrored_output_root}")
+            share_note = "\\n".join(share_lines) + "\\n"
+            SHARE_NOTE_FILE = OUTPUT_ROOT / "collab-share-note.md"
+            SHARE_NOTE_FILE.write_text(share_note, encoding="utf-8")
+            COMPLETION_MARKER_FILE.write_text(
+                "\\n".join(
+                    [
+                        f"run_name={RUN_NAME}",
+                        f"completed_at={datetime.now(timezone.utc).isoformat()}",
+                        f"share_note={SHARE_NOTE_FILE.name}",
+                        "status=completed",
+                    ]
+                )
+                + "\\n",
+                encoding="utf-8",
+            )
+            print(share_note)
+            if captured_notebook_path is None:
+                print(
+                    "Automatic notebook capture was unavailable. "
+                    f"If you want the notebook archive, save it manually to {EXECUTED_NOTEBOOK_PATH}."
+                )
+            print(f"Saved share note: {SHARE_NOTE_FILE}")
+            print(f"Saved completion marker: {COMPLETION_MARKER_FILE}")
+            if mirrored_output_root is not None:
+                mirror_output_root(OUTPUT_ROOT)
+            """
+        ).strip()
+        + "\n"
+    )
+
+
 STAGE_2 = {
     "path": REPO_ROOT / "stages/02-evidence-support-verification/notebooks/stage-02-evidence-support-verification-colab.ipynb",
     "branch": "main",
@@ -2752,6 +3339,8 @@ GENERIC_STAGES = [
 
                 Set `AUTHOR_NAME` to your name. This notebook builds the stage-specific `RUN_NAME` automatically as `yourname-stage6-v1`, `yourname-stage6-v2`, `yourname-stage6-v3`, and so on based on completed runs.
 
+                This notebook first tries to auto-fill `STAGE5_MODEL_DIR` from the latest completed Stage 5 run under the current artifact root. It also tries to auto-fill `COMPARISON_BASELINE_EVAL_PATH` from the latest available Stage 4 controller eval, falling back to Stage 5 eval if needed.
+
                 Review `TARGET_METRICS`, `SUGGESTED_MODULES`, `SMOKE_TEST_COMMANDS`, and `STAGE_COMMANDS` before you move into implementation.
 
                 This cell also prints the important values you should check before running stage commands.
@@ -2766,7 +3355,7 @@ GENERIC_STAGES = [
                 """
                 <h2 style="color: #1d4ed8;">4. Optional Smoke Test</h2>
 
-                Use this cell only after you fill in `SMOKE_TEST_COMMANDS` in the config cell. Keep those commands tiny so you can catch path, dependency, and runtime issues before a full Stage 6 run.
+                Use this cell to run a tiny Stage 6 controller train-and-evaluate pass before the full run. Keep it small so you can catch path, dependency, and runtime issues early.
                 """
             ).strip()
             + "\n"
@@ -2784,7 +3373,7 @@ GENERIC_STAGES = [
 
                 This is the main Stage 6 implementation and run section. Everything before this point is setup, sync, or validation.
 
-                Fill in `STAGE_COMMANDS` in the config cell with the actual commands for this stage. Start with one command, make sure the outputs land in `OUTPUT_ROOT`, then add the rest.
+                The config cell now builds the default Stage 6 train and evaluate commands automatically. Review those commands, adjust the controller hyperparameters if needed, and then run this section.
                 """
             ).strip()
             + "\n"
@@ -2829,6 +3418,10 @@ GENERIC_STAGES = [
             ).strip()
             + "\n"
         ),
+        "config_code": stage6_config_code(),
+        "implementation_code": stage6_implementation_code(),
+        "save_code": stage6_save_code(),
+        "share_code": stage6_share_code(),
     },
 ]
 

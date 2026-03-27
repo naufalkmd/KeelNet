@@ -23,6 +23,7 @@ keelnet-eval = "keelnet.evaluate:main"
 keelnet-verify = "keelnet.verify:main"
 keelnet-calibration = "keelnet.calibration:main"
 keelnet-learn = "keelnet.learn:main"
+keelnet-balance = "keelnet.balance:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

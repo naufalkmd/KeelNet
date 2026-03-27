@@ -1,4 +1,4 @@
-"""Shared constants for the Stage 1 to Stage 5 experiments."""
+"""Shared constants for the Stage 1 to Stage 6 experiments."""
 
 DEFAULT_MODEL_NAME = "distilbert-base-uncased"
 DEFAULT_MAX_LENGTH = 384
