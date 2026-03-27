@@ -87,11 +87,18 @@ class Stage7ActionTests(unittest.TestCase):
             examples,
             bundle,
             stage6_candidate_probabilities=np.asarray([0.95, 0.20, 0.40], dtype=np.float32),
+            raw_verifier_support_probabilities=np.asarray([0.70, 0.20, 0.30], dtype=np.float32),
+            calibrated_support_probabilities=np.asarray([0.65, 0.15, 0.25], dtype=np.float32),
+            hard_support_threshold=0.60,
         )
 
         self.assertEqual(action_sets[0].target_action_index, 0)
         self.assertEqual(action_sets[0].candidates[0].answer_text, "beta")
         self.assertAlmostEqual(action_sets[0].candidates[0].stage6_controller_probability, 0.95, places=6)
+        self.assertAlmostEqual(action_sets[0].candidates[0].stage5_support_probability, 0.8, places=6)
+        self.assertAlmostEqual(action_sets[0].candidates[0].support_probability, 0.65, places=6)
+        self.assertAlmostEqual(action_sets[0].candidates[0].calibrated_support_probability, 0.65, places=6)
+        self.assertEqual(action_sets[0].candidates[0].support_gate_pass, 1.0)
         self.assertEqual(action_sets[1].target_action_index, len(action_sets[1].candidates))
 
     def test_postprocess_action_predictions_applies_risk_shield(self):
@@ -109,9 +116,13 @@ class Stage7ActionTests(unittest.TestCase):
                         score_gap_to_best=0.0,
                         score_margin_to_next=2.0,
                         keep_probability=0.9,
+                        stage5_support_probability=0.8,
                         support_probability=0.8,
                         abstain_probability=0.1,
                         stage6_controller_probability=0.7,
+                        raw_verifier_support_probability=0.8,
+                        calibrated_support_probability=0.8,
+                        support_gate_pass=1.0,
                         answer_length_tokens=1.0,
                         normalized_rank=0.0,
                         question_overlap=0.0,
@@ -144,6 +155,61 @@ class Stage7ActionTests(unittest.TestCase):
         self.assertEqual(predictions["a1"]["abstain_reason"], "risk_shield")
         self.assertAlmostEqual(predictions["a1"]["scores"]["selected_risk_probability"], 0.80, places=6)
 
+    def test_postprocess_action_predictions_applies_support_shield(self):
+        action_sets = [
+            ActionSet(
+                example_id="a1",
+                question="Which token is correct?",
+                answerable=True,
+                target_action_index=0,
+                candidates=(
+                    ActionCandidate(
+                        example_id="a1",
+                        answer_text="beta",
+                        span_score=9.0,
+                        score_gap_to_best=0.0,
+                        score_margin_to_next=2.0,
+                        keep_probability=0.9,
+                        stage5_support_probability=0.8,
+                        support_probability=0.35,
+                        abstain_probability=0.1,
+                        stage6_controller_probability=0.7,
+                        raw_verifier_support_probability=0.4,
+                        calibrated_support_probability=0.35,
+                        support_gate_pass=0.0,
+                        answer_length_tokens=1.0,
+                        normalized_rank=0.0,
+                        question_overlap=0.0,
+                        label=1.0,
+                        hard_negative_weight=1.0,
+                        model_features=(0.0,) * 12,
+                    ),
+                ),
+            )
+        ]
+        outputs = [
+            {
+                "candidate_action_probabilities": [0.72],
+                "abstain_probability": 0.28,
+                "candidate_utility_logits": [2.0],
+                "candidate_risk_logits": [-1.4],
+                "candidate_risk_probabilities": [0.20],
+                "candidate_action_scores": [0.91],
+                "abstain_logit": 0.10,
+            }
+        ]
+
+        predictions = postprocess_action_predictions(
+            action_sets,
+            outputs,
+            risk_threshold=0.50,
+            hard_support_threshold=0.60,
+        )
+
+        self.assertEqual(predictions["a1"]["decision"], "abstain")
+        self.assertEqual(predictions["a1"]["abstain_reason"], "support_shield")
+        self.assertAlmostEqual(predictions["a1"]["scores"]["selected_support_probability"], 0.35, places=6)
+
     def test_search_risk_threshold_prefers_constraint_satisfying_tradeoff(self):
         action_sets = [
             ActionSet(
@@ -159,9 +225,13 @@ class Stage7ActionTests(unittest.TestCase):
                         score_gap_to_best=0.0,
                         score_margin_to_next=2.0,
                         keep_probability=0.9,
+                        stage5_support_probability=0.8,
                         support_probability=0.8,
                         abstain_probability=0.1,
                         stage6_controller_probability=0.7,
+                        raw_verifier_support_probability=0.8,
+                        calibrated_support_probability=0.8,
+                        support_gate_pass=1.0,
                         answer_length_tokens=1.0,
                         normalized_rank=0.0,
                         question_overlap=0.0,
@@ -184,9 +254,13 @@ class Stage7ActionTests(unittest.TestCase):
                         score_gap_to_best=0.0,
                         score_margin_to_next=1.0,
                         keep_probability=0.8,
+                        stage5_support_probability=0.4,
                         support_probability=0.4,
                         abstain_probability=0.2,
                         stage6_controller_probability=0.5,
+                        raw_verifier_support_probability=0.4,
+                        calibrated_support_probability=0.4,
+                        support_gate_pass=1.0,
                         answer_length_tokens=1.0,
                         normalized_rank=0.0,
                         question_overlap=0.0,

@@ -75,9 +75,13 @@ class ActionCandidate:
     score_gap_to_best: float
     score_margin_to_next: float
     keep_probability: float
+    stage5_support_probability: float
     support_probability: float
     abstain_probability: float
     stage6_controller_probability: float
+    raw_verifier_support_probability: float
+    calibrated_support_probability: float
+    support_gate_pass: float
     answer_length_tokens: float
     normalized_rank: float
     question_overlap: float
@@ -129,6 +133,12 @@ class RiskBudgetedActionConfig:
     hard_risk_threshold: float
     max_train_samples: int | None
     max_eval_samples: int | None
+    clean_splitting: bool = False
+    max_test_samples: int | None = None
+    control_path: str | None = None
+    verifier_model_path: str | None = None
+    support_temperature: float | None = None
+    hard_support_threshold: float | None = None
 
 
 class RiskBudgetedActionModel(nn.Module):
@@ -220,6 +230,7 @@ def _candidate_feature_vector(
     *,
     question: str,
     stage6_probability: float,
+    support_probability: float,
 ) -> list[float]:
     keep_uncertainty = 1.0 - abs(float(record.keep_probability) - 0.5) * 2.0
     return [
@@ -227,15 +238,77 @@ def _candidate_feature_vector(
         float(record.score_gap_to_best),
         float(record.score_margin_to_next),
         float(record.keep_probability),
-        float(record.support_probability),
+        float(support_probability),
         float(record.abstain_probability),
         float(stage6_probability),
         float(record.answer_length_tokens),
         float(record.normalized_rank),
         float(_question_overlap(question, record.answer_text)),
-        float(record.keep_probability - record.support_probability),
+        float(record.keep_probability - support_probability),
         float(max(0.0, keep_uncertainty)),
     ]
+
+
+def _prepare_control_runtime(
+    *,
+    control_path: Path | None,
+    verifier_model_path: Path | None,
+    hard_support_threshold: float | None,
+    eval_batch_size: int,
+    output_dir: Path,
+) -> dict[str, Any] | None:
+    if control_path is None:
+        return None
+
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer, Trainer, TrainingArguments
+
+    from keelnet.hf_compat import trainer_processing_kwargs
+    from keelnet.hybrid import _load_control_settings
+
+    control_settings = _load_control_settings(
+        control_path,
+        verifier_model_path=verifier_model_path,
+        hard_support_threshold=hard_support_threshold,
+    )
+    verifier_tokenizer = AutoTokenizer.from_pretrained(control_settings["verifier_model_path"], use_fast=True)
+    verifier_model = AutoModelForSequenceClassification.from_pretrained(control_settings["verifier_model_path"])
+    verifier_trainer = Trainer(
+        model=verifier_model,
+        args=TrainingArguments(
+            output_dir=str(output_dir),
+            per_device_eval_batch_size=eval_batch_size,
+            report_to=[],
+        ),
+        **trainer_processing_kwargs(Trainer, verifier_tokenizer),
+    )
+    return {
+        "control_settings": control_settings,
+        "verifier_tokenizer": verifier_tokenizer,
+        "verifier_trainer": verifier_trainer,
+    }
+
+
+def _score_bundle_with_control(
+    examples,
+    bundle: CandidateBundle,
+    *,
+    control_runtime: dict[str, Any] | None,
+    max_length: int,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    if control_runtime is None:
+        return None, None
+
+    from keelnet.hybrid import score_bundle_with_verifier
+
+    raw_support, calibrated_support = score_bundle_with_verifier(
+        control_runtime["verifier_trainer"],
+        control_runtime["verifier_tokenizer"],
+        examples,
+        bundle,
+        max_length=max_length,
+        support_temperature=float(control_runtime["control_settings"]["support_temperature"]),
+    )
+    return raw_support, calibrated_support
 
 
 def build_action_sets(
@@ -243,16 +316,41 @@ def build_action_sets(
     bundle: CandidateBundle,
     *,
     stage6_candidate_probabilities: np.ndarray | None = None,
+    raw_verifier_support_probabilities: np.ndarray | None = None,
+    calibrated_support_probabilities: np.ndarray | None = None,
+    hard_support_threshold: float | None = None,
 ) -> list[ActionSet]:
     if stage6_candidate_probabilities is not None and len(stage6_candidate_probabilities) != len(bundle.records):
         raise ValueError("Stage 6 candidate probabilities must align with bundle records.")
+    if raw_verifier_support_probabilities is not None and len(raw_verifier_support_probabilities) != len(bundle.records):
+        raise ValueError("Raw verifier support probabilities must align with bundle records.")
+    if calibrated_support_probabilities is not None and len(calibrated_support_probabilities) != len(bundle.records):
+        raise ValueError("Calibrated support probabilities must align with bundle records.")
 
-    records_by_example: dict[str, list[tuple[CandidateRecord, float]]] = defaultdict(list)
+    records_by_example: dict[str, list[tuple[CandidateRecord, float, float | None, float | None]]] = defaultdict(list)
     if stage6_candidate_probabilities is None:
         stage6_candidate_probabilities = np.zeros((len(bundle.records),), dtype=np.float32)
 
-    for record, stage6_probability in zip(bundle.records, stage6_candidate_probabilities, strict=False):
-        records_by_example[record.example_id].append((record, float(stage6_probability)))
+    if raw_verifier_support_probabilities is None:
+        raw_verifier_support_probabilities = np.full((len(bundle.records),), np.nan, dtype=np.float32)
+    if calibrated_support_probabilities is None:
+        calibrated_support_probabilities = np.full((len(bundle.records),), np.nan, dtype=np.float32)
+
+    for record, stage6_probability, raw_support, calibrated_support in zip(
+        bundle.records,
+        stage6_candidate_probabilities,
+        raw_verifier_support_probabilities,
+        calibrated_support_probabilities,
+        strict=False,
+    ):
+        records_by_example[record.example_id].append(
+            (
+                record,
+                float(stage6_probability),
+                None if np.isnan(raw_support) else float(raw_support),
+                None if np.isnan(calibrated_support) else float(calibrated_support),
+            )
+        )
 
     action_sets: list[ActionSet] = []
     for example in examples:
@@ -269,9 +367,29 @@ def build_action_sets(
                 score_gap_to_best=float(record.score_gap_to_best),
                 score_margin_to_next=float(record.score_margin_to_next),
                 keep_probability=float(record.keep_probability),
-                support_probability=float(record.support_probability),
+                stage5_support_probability=float(record.support_probability),
+                support_probability=float(
+                    calibrated_support
+                    if calibrated_support is not None
+                    else record.support_probability
+                ),
                 abstain_probability=float(record.abstain_probability),
                 stage6_controller_probability=float(stage6_probability),
+                raw_verifier_support_probability=float(
+                    raw_support
+                    if raw_support is not None
+                    else record.support_probability
+                ),
+                calibrated_support_probability=float(
+                    calibrated_support
+                    if calibrated_support is not None
+                    else record.support_probability
+                ),
+                support_gate_pass=float(
+                    1.0
+                    if calibrated_support is None or hard_support_threshold is None
+                    else float(calibrated_support >= hard_support_threshold)
+                ),
                 answer_length_tokens=float(record.answer_length_tokens),
                 normalized_rank=float(record.normalized_rank),
                 question_overlap=float(_question_overlap(question, record.answer_text)),
@@ -282,10 +400,15 @@ def build_action_sets(
                         record,
                         question=question,
                         stage6_probability=float(stage6_probability),
+                        support_probability=float(
+                            calibrated_support
+                            if calibrated_support is not None
+                            else record.support_probability
+                        ),
                     )
                 ),
             )
-            for record, stage6_probability in raw_candidates
+            for record, stage6_probability, raw_support, calibrated_support in raw_candidates
         )
 
         supported_indexes = [index for index, candidate in enumerate(candidates) if candidate.label > 0.5]
@@ -293,6 +416,7 @@ def build_action_sets(
             target_action_index = max(
                 supported_indexes,
                 key=lambda index: (
+                    candidates[index].support_gate_pass,
                     candidates[index].stage6_controller_probability,
                     candidates[index].keep_probability,
                     candidates[index].support_probability,
@@ -584,6 +708,7 @@ def postprocess_action_predictions(
     action_outputs: list[dict[str, Any]],
     *,
     risk_threshold: float,
+    hard_support_threshold: float | None = None,
 ) -> dict[str, dict[str, Any]]:
     predictions: dict[str, dict[str, Any]] = {}
     for action_set, action_output in zip(action_sets, action_outputs, strict=False):
@@ -616,24 +741,34 @@ def postprocess_action_predictions(
         abstain_probability = float(action_output["abstain_probability"])
         abstain_score = float(action_output["abstain_logit"])
 
-        safe_candidate_indexes = [
+        risk_safe_candidate_indexes = [
             index
             for index in ranked_candidate_indexes
             if float(action_output["candidate_risk_probabilities"][index]) < risk_threshold
         ]
+        if hard_support_threshold is not None:
+            safe_candidate_indexes = [
+                index
+                for index in risk_safe_candidate_indexes
+                if float(action_set.candidates[index].calibrated_support_probability) >= hard_support_threshold
+            ]
+        else:
+            safe_candidate_indexes = risk_safe_candidate_indexes
         selected_candidate_index = safe_candidate_indexes[0] if safe_candidate_indexes else None
 
         if selected_candidate_index is None:
+            abstain_reason = "support_shield" if risk_safe_candidate_indexes and hard_support_threshold is not None else "risk_shield"
             predictions[action_set.example_id] = {
                 "decision": "abstain",
                 "answer": "",
                 "scores": {
                     "selected_action_probability": abstain_probability,
                     "selected_risk_probability": float(action_output["candidate_risk_probabilities"][top_candidate_index]),
+                    "selected_support_probability": float(action_set.candidates[top_candidate_index].calibrated_support_probability),
                     "best_candidate_score": top_candidate_score,
                     "abstain_score": abstain_score,
                 },
-                "abstain_reason": "risk_shield",
+                "abstain_reason": abstain_reason,
             }
             continue
 
@@ -649,6 +784,7 @@ def postprocess_action_predictions(
                 "scores": {
                     "selected_action_probability": abstain_probability,
                     "selected_risk_probability": selected_risk_probability,
+                    "selected_support_probability": float(selected_candidate.calibrated_support_probability),
                     "best_candidate_score": selected_candidate_score,
                     "abstain_score": abstain_score,
                 },
@@ -667,9 +803,12 @@ def postprocess_action_predictions(
                 "span_score": selected_candidate.span_score,
                 "keep_probability": selected_candidate.keep_probability,
                 "support_probability": selected_candidate.support_probability,
+                "stage5_support_probability": selected_candidate.stage5_support_probability,
                 "stage6_controller_probability": selected_candidate.stage6_controller_probability,
+                "raw_verifier_support_probability": selected_candidate.raw_verifier_support_probability,
+                "calibrated_support_probability": selected_candidate.calibrated_support_probability,
             },
-            "support": {"score": 1.0 - selected_risk_probability},
+            "support": {"score": selected_candidate.calibrated_support_probability},
             "risk": {"score": selected_risk_probability},
             "action": {
                 "selected_answer": selected_candidate.answer_text,
@@ -731,6 +870,7 @@ def search_risk_threshold(
     match_f1_threshold: float,
     max_unsupported_answer_rate: float,
     max_overabstain_rate: float,
+    hard_support_threshold: float | None = None,
 ) -> tuple[float, dict[str, float], dict[str, float], dict[str, float], list[dict[str, float]]]:
     sweep: list[dict[str, float]] = []
     current = float(threshold_min)
@@ -739,6 +879,7 @@ def search_risk_threshold(
             action_sets,
             action_outputs,
             risk_threshold=current,
+            hard_support_threshold=hard_support_threshold,
         )
         metrics = compute_stage1_metrics(predictions, references)
         mix = compute_answer_support_mix(
@@ -916,6 +1057,8 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--stage5-model-path", type=Path, required=True)
     train_parser.add_argument("--output-dir", type=Path, required=True)
     train_parser.add_argument("--stage6-controller-path", type=Path, default=None)
+    train_parser.add_argument("--control-path", type=Path, default=None)
+    train_parser.add_argument("--verifier-model-path", type=Path, default=None)
     train_parser.add_argument("--max-length", type=int, default=DEFAULT_MAX_LENGTH)
     train_parser.add_argument("--doc-stride", type=int, default=DEFAULT_DOC_STRIDE)
     train_parser.add_argument("--max-answer-length", type=int, default=DEFAULT_MAX_ANSWER_LENGTH)
@@ -931,6 +1074,12 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--dropout", type=float, default=0.10)
     train_parser.add_argument("--max-train-samples", type=int, default=None)
     train_parser.add_argument("--max-eval-samples", type=int, default=None)
+    train_parser.add_argument(
+        "--clean-splitting",
+        action="store_true",
+        help="Use train/validation/test splits and keep the official SQuAD validation split untouched for final testing.",
+    )
+    train_parser.add_argument("--max-test-samples", type=int, default=None)
     train_parser.add_argument("--max-candidates-per-example", type=int, default=6)
     train_parser.add_argument("--max-candidates-per-feature", type=int, default=3)
     train_parser.add_argument("--action-loss-weight", type=float, default=1.0)
@@ -952,6 +1101,7 @@ def build_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--unsafe-dual-lr", type=float, default=0.25)
     train_parser.add_argument("--overabstain-dual-lr", type=float, default=0.25)
     train_parser.add_argument("--hard-risk-threshold", type=float, default=0.35)
+    train_parser.add_argument("--hard-support-threshold", type=float, default=None)
     train_parser.add_argument("--match-f1-threshold", type=float, default=DEFAULT_SUPPORT_MATCH_F1)
 
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate the Stage 7 risk-budgeted action learner.")
@@ -959,6 +1109,8 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--output-path", type=Path, required=True)
     eval_parser.add_argument("--stage5-model-path", type=Path, default=None)
     eval_parser.add_argument("--stage6-controller-path", type=Path, default=None)
+    eval_parser.add_argument("--control-path", type=Path, default=None)
+    eval_parser.add_argument("--verifier-model-path", type=Path, default=None)
     eval_parser.add_argument("--max-length", type=int, default=DEFAULT_MAX_LENGTH)
     eval_parser.add_argument("--doc-stride", type=int, default=DEFAULT_DOC_STRIDE)
     eval_parser.add_argument("--max-answer-length", type=int, default=DEFAULT_MAX_ANSWER_LENGTH)
@@ -967,6 +1119,12 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     eval_parser.add_argument("--eval-batch-size", type=int, default=32)
     eval_parser.add_argument("--max-eval-samples", type=int, default=None)
+    eval_parser.add_argument(
+        "--clean-splitting",
+        action="store_true",
+        help="Use train/validation/test splits and report final results on the untouched test split.",
+    )
+    eval_parser.add_argument("--max-test-samples", type=int, default=None)
     eval_parser.add_argument("--match-f1-threshold", type=float, default=DEFAULT_SUPPORT_MATCH_F1)
     eval_parser.add_argument(
         "--risk-threshold-min",
@@ -993,6 +1151,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_STAGE7_MAX_OVERABSTAIN_RATE,
     )
+    eval_parser.add_argument("--hard-support-threshold", type=float, default=None)
     return parser
 
 
@@ -1012,6 +1171,8 @@ def _train_action_learner(args: argparse.Namespace) -> None:
         eval_batch_size=args.eval_batch_size,
         max_train_samples=args.max_train_samples,
         max_eval_samples=args.max_eval_samples,
+        clean_splitting=args.clean_splitting,
+        max_test_samples=args.max_test_samples,
     )
     train_bundle = build_candidate_bundle(
         artifacts["train"]["examples"],
@@ -1043,6 +1204,13 @@ def _train_action_learner(args: argparse.Namespace) -> None:
     if validation_bundle.features.size == 0:
         raise ValueError("No Stage 7 validation candidates were generated.")
 
+    control_runtime = _prepare_control_runtime(
+        control_path=args.control_path,
+        verifier_model_path=args.verifier_model_path,
+        hard_support_threshold=args.hard_support_threshold,
+        eval_batch_size=args.eval_batch_size,
+        output_dir=args.output_dir / "tmp-stage7-control-train",
+    )
     stage6_train_probabilities = _resolve_stage6_candidate_probabilities(
         train_bundle,
         stage6_controller_path=args.stage6_controller_path,
@@ -1055,16 +1223,42 @@ def _train_action_learner(args: argparse.Namespace) -> None:
         batch_size=args.eval_batch_size,
         device=device,
     )
+    train_raw_support_probabilities, train_calibrated_support_probabilities = _score_bundle_with_control(
+        artifacts["train"]["examples"],
+        train_bundle,
+        control_runtime=control_runtime,
+        max_length=args.max_length,
+    )
+    validation_raw_support_probabilities, validation_calibrated_support_probabilities = _score_bundle_with_control(
+        artifacts["validation"]["examples"],
+        validation_bundle,
+        control_runtime=control_runtime,
+        max_length=args.max_length,
+    )
 
     train_action_sets = build_action_sets(
         artifacts["train"]["examples"],
         train_bundle,
         stage6_candidate_probabilities=stage6_train_probabilities,
+        raw_verifier_support_probabilities=train_raw_support_probabilities,
+        calibrated_support_probabilities=train_calibrated_support_probabilities,
+        hard_support_threshold=(
+            None
+            if control_runtime is None
+            else float(control_runtime["control_settings"]["hard_support_threshold"])
+        ),
     )
     validation_action_sets = build_action_sets(
         artifacts["validation"]["examples"],
         validation_bundle,
         stage6_candidate_probabilities=stage6_validation_probabilities,
+        raw_verifier_support_probabilities=validation_raw_support_probabilities,
+        calibrated_support_probabilities=validation_calibrated_support_probabilities,
+        hard_support_threshold=(
+            None
+            if control_runtime is None
+            else float(control_runtime["control_settings"]["hard_support_threshold"])
+        ),
     )
 
     train_feature_matrix = flatten_action_features(train_action_sets)
@@ -1159,6 +1353,11 @@ def _train_action_learner(args: argparse.Namespace) -> None:
             standardized_validation_sets,
             validation_outputs,
             risk_threshold=args.hard_risk_threshold,
+            hard_support_threshold=(
+                None
+                if control_runtime is None
+                else float(control_runtime["control_settings"]["hard_support_threshold"])
+            ),
         )
         validation_metrics = compute_stage1_metrics(validation_predictions, validation_references)
         validation_mix = compute_answer_support_mix(
@@ -1262,6 +1461,24 @@ def _train_action_learner(args: argparse.Namespace) -> None:
         hard_risk_threshold=args.hard_risk_threshold,
         max_train_samples=args.max_train_samples,
         max_eval_samples=args.max_eval_samples,
+        clean_splitting=args.clean_splitting,
+        max_test_samples=args.max_test_samples,
+        control_path=str(args.control_path) if args.control_path is not None else None,
+        verifier_model_path=(
+            None
+            if control_runtime is None
+            else str(control_runtime["control_settings"]["verifier_model_path"])
+        ),
+        support_temperature=(
+            None
+            if control_runtime is None
+            else float(control_runtime["control_settings"]["support_temperature"])
+        ),
+        hard_support_threshold=(
+            None
+            if control_runtime is None
+            else float(control_runtime["control_settings"]["hard_support_threshold"])
+        ),
     )
     _save_action_model(model.cpu(), args.output_dir, config, training_history)
 
@@ -1269,6 +1486,7 @@ def _train_action_learner(args: argparse.Namespace) -> None:
         "stage": "stage7-risk-budgeted-action-train",
         "stage5_model_path": str(args.stage5_model_path),
         "stage6_controller_path": str(args.stage6_controller_path) if args.stage6_controller_path is not None else None,
+        "control_path": str(args.control_path) if args.control_path is not None else None,
         "train_examples": len(artifacts["train"]["examples"]),
         "validation_examples": len(artifacts["validation"]["examples"]),
         "train_candidate_count": len(train_bundle.records),
@@ -1276,6 +1494,13 @@ def _train_action_learner(args: argparse.Namespace) -> None:
         "best_epoch": best_entry["epoch"] if best_entry is not None else None,
         "unsafe_dual": best_unsafe_dual,
         "overabstain_dual": best_overabstain_dual,
+        "hard_support_threshold": (
+            None
+            if control_runtime is None
+            else float(control_runtime["control_settings"]["hard_support_threshold"])
+        ),
+        "clean_splitting": bool(args.clean_splitting),
+        "max_test_samples": args.max_test_samples,
     }
     (args.output_dir / "run_config.json").write_text(
         json.dumps(run_metadata, indent=2) + "\n",
@@ -1292,6 +1517,32 @@ def _evaluate_action_learner(args: argparse.Namespace) -> None:
         if args.stage6_controller_path is not None
         else (Path(config.stage6_controller_path) if config.stage6_controller_path is not None else None)
     )
+    resolved_control_path = (
+        args.control_path
+        if args.control_path is not None
+        else (Path(config.control_path) if getattr(config, "control_path", None) is not None else None)
+    )
+    resolved_verifier_model_path = (
+        args.verifier_model_path
+        if args.verifier_model_path is not None
+        else (
+            Path(config.verifier_model_path)
+            if getattr(config, "verifier_model_path", None) is not None
+            else None
+        )
+    )
+    resolved_hard_support_threshold = (
+        args.hard_support_threshold
+        if args.hard_support_threshold is not None
+        else getattr(config, "hard_support_threshold", None)
+    )
+    clean_splitting = bool(args.clean_splitting or getattr(config, "clean_splitting", False))
+    resolved_max_test_samples = (
+        args.max_test_samples
+        if args.max_test_samples is not None
+        else getattr(config, "max_test_samples", None)
+    )
+    final_split_name = "test" if clean_splitting else "dev"
     feature_mean = np.asarray(config.feature_mean, dtype=np.float32)
     feature_std = np.asarray(config.feature_std, dtype=np.float32)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -1306,6 +1557,8 @@ def _evaluate_action_learner(args: argparse.Namespace) -> None:
         eval_batch_size=args.eval_batch_size,
         max_train_samples=None,
         max_eval_samples=args.max_eval_samples,
+        clean_splitting=clean_splitting,
+        max_test_samples=resolved_max_test_samples,
     )
     validation_bundle = build_candidate_bundle(
         artifacts["validation"]["examples"],
@@ -1319,17 +1572,24 @@ def _evaluate_action_learner(args: argparse.Namespace) -> None:
         match_f1_threshold=args.match_f1_threshold,
         hard_negative_weight=config.tail_risk_weight,
     )
-    dev_bundle = build_candidate_bundle(
-        artifacts["dev"]["examples"],
-        artifacts["dev"]["features"],
-        artifacts["dev"]["raw_predictions"],
-        artifacts["dev"]["references"],
+    final_bundle = build_candidate_bundle(
+        artifacts[final_split_name]["examples"],
+        artifacts[final_split_name]["features"],
+        artifacts[final_split_name]["raw_predictions"],
+        artifacts[final_split_name]["references"],
         n_best_size=config.n_best_size,
         max_answer_length=config.max_answer_length,
         max_candidates_per_example=config.max_candidates_per_example,
         max_candidates_per_feature=config.max_candidates_per_feature,
         match_f1_threshold=args.match_f1_threshold,
         hard_negative_weight=config.tail_risk_weight,
+    )
+    control_runtime = _prepare_control_runtime(
+        control_path=resolved_control_path,
+        verifier_model_path=resolved_verifier_model_path,
+        hard_support_threshold=resolved_hard_support_threshold,
+        eval_batch_size=args.eval_batch_size,
+        output_dir=args.output_path.parent / "tmp-stage7-control-eval",
     )
 
     validation_stage6_probabilities = _resolve_stage6_candidate_probabilities(
@@ -1338,25 +1598,51 @@ def _evaluate_action_learner(args: argparse.Namespace) -> None:
         batch_size=args.eval_batch_size,
         device=device,
     )
-    dev_stage6_probabilities = _resolve_stage6_candidate_probabilities(
-        dev_bundle,
+    final_stage6_probabilities = _resolve_stage6_candidate_probabilities(
+        final_bundle,
         stage6_controller_path=resolved_stage6_controller_path,
         batch_size=args.eval_batch_size,
         device=device,
+    )
+    validation_raw_support_probabilities, validation_calibrated_support_probabilities = _score_bundle_with_control(
+        artifacts["validation"]["examples"],
+        validation_bundle,
+        control_runtime=control_runtime,
+        max_length=args.max_length,
+    )
+    final_raw_support_probabilities, final_calibrated_support_probabilities = _score_bundle_with_control(
+        artifacts[final_split_name]["examples"],
+        final_bundle,
+        control_runtime=control_runtime,
+        max_length=args.max_length,
     )
 
     validation_action_sets = build_action_sets(
         artifacts["validation"]["examples"],
         validation_bundle,
         stage6_candidate_probabilities=validation_stage6_probabilities,
+        raw_verifier_support_probabilities=validation_raw_support_probabilities,
+        calibrated_support_probabilities=validation_calibrated_support_probabilities,
+        hard_support_threshold=(
+            None
+            if control_runtime is None
+            else float(control_runtime["control_settings"]["hard_support_threshold"])
+        ),
     )
-    dev_action_sets = build_action_sets(
-        artifacts["dev"]["examples"],
-        dev_bundle,
-        stage6_candidate_probabilities=dev_stage6_probabilities,
+    final_action_sets = build_action_sets(
+        artifacts[final_split_name]["examples"],
+        final_bundle,
+        stage6_candidate_probabilities=final_stage6_probabilities,
+        raw_verifier_support_probabilities=final_raw_support_probabilities,
+        calibrated_support_probabilities=final_calibrated_support_probabilities,
+        hard_support_threshold=(
+            None
+            if control_runtime is None
+            else float(control_runtime["control_settings"]["hard_support_threshold"])
+        ),
     )
     standardized_validation_sets = standardize_action_sets(validation_action_sets, feature_mean, feature_std)
-    standardized_dev_sets = standardize_action_sets(dev_action_sets, feature_mean, feature_std)
+    standardized_final_sets = standardize_action_sets(final_action_sets, feature_mean, feature_std)
 
     validation_outputs = _predict_action_outputs(
         model,
@@ -1366,9 +1652,9 @@ def _evaluate_action_learner(args: argparse.Namespace) -> None:
         unsafe_dual=config.unsafe_dual,
         overabstain_dual=config.overabstain_dual,
     )
-    dev_outputs = _predict_action_outputs(
+    final_outputs = _predict_action_outputs(
         model,
-        standardized_dev_sets,
+        standardized_final_sets,
         batch_size=config.eval_batch_size,
         device=device,
         unsafe_dual=config.unsafe_dual,
@@ -1385,26 +1671,54 @@ def _evaluate_action_learner(args: argparse.Namespace) -> None:
         match_f1_threshold=args.match_f1_threshold,
         max_unsupported_answer_rate=args.max_unsupported_answer_rate,
         max_overabstain_rate=args.max_overabstain_rate,
+        hard_support_threshold=(
+            None
+            if control_runtime is None
+            else float(control_runtime["control_settings"]["hard_support_threshold"])
+        ),
     )
 
-    dev_predictions = postprocess_action_predictions(
-        standardized_dev_sets,
-        dev_outputs,
+    final_predictions = postprocess_action_predictions(
+        standardized_final_sets,
+        final_outputs,
         risk_threshold=selected_threshold,
+        hard_support_threshold=(
+            None
+            if control_runtime is None
+            else float(control_runtime["control_settings"]["hard_support_threshold"])
+        ),
     )
-    dev_metrics = compute_stage1_metrics(dev_predictions, artifacts["dev"]["references"])
-    dev_mix = compute_answer_support_mix(
-        dev_predictions,
-        artifacts["dev"]["references"],
+    final_metrics = compute_stage1_metrics(final_predictions, artifacts[final_split_name]["references"])
+    final_mix = compute_answer_support_mix(
+        final_predictions,
+        artifacts[final_split_name]["references"],
         match_f1_threshold=args.match_f1_threshold,
     )
-    dev_overabstain = compute_overabstain_stats(dev_predictions, artifacts["dev"]["references"])
+    final_overabstain = compute_overabstain_stats(final_predictions, artifacts[final_split_name]["references"])
 
     output = {
         "stage": "stage7-risk-budgeted-action-eval",
         "model_path": str(args.model_path),
         "stage5_model_path": str(resolved_stage5_model_path),
         "stage6_controller_path": str(resolved_stage6_controller_path) if resolved_stage6_controller_path is not None else None,
+        "control_path": str(resolved_control_path) if resolved_control_path is not None else None,
+        "verifier_model_path": (
+            None
+            if control_runtime is None
+            else str(control_runtime["control_settings"]["verifier_model_path"])
+        ),
+        "support_temperature": (
+            None
+            if control_runtime is None
+            else float(control_runtime["control_settings"]["support_temperature"])
+        ),
+        "hard_support_threshold": (
+            None
+            if control_runtime is None
+            else float(control_runtime["control_settings"]["hard_support_threshold"])
+        ),
+        "clean_splitting": clean_splitting,
+        "final_eval_split": final_split_name,
         "selected_risk_threshold": selected_threshold,
         "max_unsupported_answer_rate": args.max_unsupported_answer_rate,
         "max_overabstain_rate": args.max_overabstain_rate,
@@ -1414,12 +1728,22 @@ def _evaluate_action_learner(args: argparse.Namespace) -> None:
         "validation_mix": validation_mix,
         "validation_overabstain": validation_overabstain,
         "threshold_sweep": threshold_sweep,
-        "dev_metrics": dev_metrics,
-        "dev_mix": dev_mix,
-        "dev_overabstain": dev_overabstain,
-        "dev_predictions": dev_predictions,
+        "final_metrics": final_metrics,
+        "final_mix": final_mix,
+        "final_overabstain": final_overabstain,
+        "final_predictions": final_predictions,
         "feature_names": list(config.feature_names),
     }
+    if final_split_name == "dev":
+        output["dev_metrics"] = final_metrics
+        output["dev_mix"] = final_mix
+        output["dev_overabstain"] = final_overabstain
+        output["dev_predictions"] = final_predictions
+    else:
+        output["test_metrics"] = final_metrics
+        output["test_mix"] = final_mix
+        output["test_overabstain"] = final_overabstain
+        output["test_predictions"] = final_predictions
     args.output_path.write_text(json.dumps(output, indent=2) + "\n", encoding="utf-8")
 
 

@@ -28,8 +28,64 @@ def load_stage1_splits(
     """Load SQuAD v2 and create deterministic train/validation/dev splits."""
 
     raw = load_dataset("squad_v2")
-    train = raw["train"]
-    dev = raw["validation"]
+    return build_stage1_splits_from_raw(
+        train=raw["train"],
+        eval_source=raw["validation"],
+        validation_size=validation_size,
+        seed=seed,
+        answer_only_train=answer_only_train,
+        clean_splitting=False,
+        max_train_samples=max_train_samples,
+        max_eval_samples=max_eval_samples,
+    )
+
+
+def load_stage1_clean_splits(
+    *,
+    validation_size: float,
+    seed: int,
+    answer_only_train: bool,
+    max_train_samples: int | None = None,
+    max_eval_samples: int | None = None,
+    max_test_samples: int | None = None,
+) -> DatasetDict:
+    """Load SQuAD v2 and create deterministic train/validation/test splits.
+
+    This variant keeps the official SQuAD validation split untouched as the final
+    `test` split instead of exposing it as `dev`.
+    """
+
+    raw = load_dataset("squad_v2")
+    return build_stage1_splits_from_raw(
+        train=raw["train"],
+        eval_source=raw["validation"],
+        validation_size=validation_size,
+        seed=seed,
+        answer_only_train=answer_only_train,
+        clean_splitting=True,
+        max_train_samples=max_train_samples,
+        max_eval_samples=max_eval_samples,
+        max_test_samples=max_test_samples,
+    )
+
+
+def build_stage1_splits_from_raw(
+    *,
+    train: Dataset,
+    eval_source: Dataset,
+    validation_size: float,
+    seed: int,
+    answer_only_train: bool,
+    clean_splitting: bool,
+    max_train_samples: int | None = None,
+    max_eval_samples: int | None = None,
+    max_test_samples: int | None = None,
+) -> DatasetDict:
+    """Build Stage 1 splits from raw datasets.
+
+    `clean_splitting=False` returns `train` / `validation` / `dev`.
+    `clean_splitting=True` returns `train` / `validation` / `test`.
+    """
 
     answerable_train = train.filter(is_answerable, desc="Filtering answerable train examples")
     unanswerable_train = train.filter(
@@ -55,15 +111,25 @@ def load_stage1_splits(
 
     if max_eval_samples is not None:
         validation_split = validation_split.select(range(min(max_eval_samples, len(validation_split))))
-        dev = dev.select(range(min(max_eval_samples, len(dev))))
 
-    return DatasetDict(
-        {
-            "train": train_split,
-            "validation": validation_split,
-            "dev": dev,
-        }
-    )
+    split_dict: dict[str, Dataset] = {
+        "train": train_split,
+        "validation": validation_split,
+    }
+
+    if clean_splitting:
+        test_split = eval_source
+        capped_test_samples = max_test_samples if max_test_samples is not None else max_eval_samples
+        if capped_test_samples is not None:
+            test_split = test_split.select(range(min(capped_test_samples, len(test_split))))
+        split_dict["test"] = test_split
+    else:
+        dev_split = eval_source
+        if max_eval_samples is not None:
+            dev_split = dev_split.select(range(min(max_eval_samples, len(dev_split))))
+        split_dict["dev"] = dev_split
+
+    return DatasetDict(split_dict)
 
 
 def build_reference_index(dataset: Dataset) -> dict[str, dict[str, Any]]:
