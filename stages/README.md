@@ -66,6 +66,7 @@ Examples:
 - `notebooks/stage-02-evidence-support-verification-colab.ipynb`
 - `notebooks/stage-02-5-hard-negative-support-verification-colab.ipynb`
 - `notebooks/stage-05-support-constrained-learning-colab.ipynb`
+- `notebooks/stage-08-2-action-learner-calibrated-support-colab.ipynb`
 
 Use the stage-specific `stage-XX-...-colab.ipynb` files as the canonical
 notebook names for each stage.
