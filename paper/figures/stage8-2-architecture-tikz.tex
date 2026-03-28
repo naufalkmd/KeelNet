@@ -1,0 +1,71 @@
+\begin{tikzpicture}[
+  >=Latex,
+  x=1mm,
+  y=1mm,
+  every node/.style={font=\footnotesize, align=center},
+  block/.style={
+    draw,
+    rounded corners,
+    fill=blue!6,
+    minimum width=26mm,
+    minimum height=8mm,
+    inner sep=2.5pt
+  },
+  data/.style={
+    draw,
+    rounded corners,
+    fill=green!8,
+    minimum width=24mm,
+    minimum height=8mm,
+    inner sep=2.5pt
+  },
+  head/.style={
+    draw,
+    rounded corners,
+    fill=orange!10,
+    minimum width=17mm,
+    minimum height=7mm,
+    inner sep=2pt
+  },
+  merge/.style={
+    draw,
+    rounded corners,
+    fill=gray!10,
+    minimum width=31mm,
+    minimum height=8mm,
+    inner sep=2.5pt
+  },
+  arrow/.style={->, thick},
+  shield/.style={->, thick, dashed}
+]
+
+\node[block] (input) at (0,2) {Question\\+ Passage};
+\node[block] (stage5) at (32,15) {Stage 5 DistilBERT QA\\frozen answer engine};
+\node[data] (cand) at (69,2) {Top-$K$ candidate spans\\+ Stage 5 scores};
+\node[merge] (features) at (108,15) {Candidate feature builder\\span, keep, support, rank, overlap};
+\node[block] (mlp) at (149,2) {Stage 8.2 action MLP\\two-layer GELU encoder};
+\node[merge] (select) at (194,15) {Risk-adjusted action selection\\+ optional support shield};
+\node[block] (output) at (239,2) {Final answer\\or \abstain};
+
+\node[data] (support) at (108,34) {Stage 4 calibrated support\\probability + support floor};
+\node[head] (utility) at (132,-19) {Utility};
+\node[head] (risk) at (159,-25) {Risk};
+\node[head] (abstain) at (186,-19) {Abstain};
+
+\draw[arrow] (input) -- (stage5);
+\draw[arrow] (stage5) -- (cand);
+\draw[arrow] (cand) -- (features);
+\draw[arrow] (features) -- (mlp);
+\draw[arrow] (mlp) -- (select);
+\draw[arrow] (select) -- (output);
+
+\draw[arrow] (mlp) -- (utility);
+\draw[arrow] (mlp) -- (risk);
+\draw[arrow] (mlp) -- (abstain);
+\draw[arrow] (utility.north) -- ++(0,7) -| ([xshift=-10mm]select.south);
+\draw[arrow] (risk.north) -- ++(0,10) -| (select.south);
+\draw[arrow] (abstain.north) -- ++(0,7) -| ([xshift=10mm]select.south);
+\draw[shield] (support) -- (features);
+\draw[shield] (support.east) -| (select.north);
+
+\end{tikzpicture}

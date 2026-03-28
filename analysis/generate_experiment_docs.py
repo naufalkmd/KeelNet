@@ -142,9 +142,60 @@ LABELS = {
 }
 
 
+NOTEBOOK_TEMPLATE_PATHS: dict[str, str] = {
+    "stage1": "stages/01-grounded-abstention-baseline/notebooks/stage-01-grounded-abstention-baseline-colab.ipynb",
+    "stage2": "stages/02-evidence-support-verification/notebooks/stage-02-evidence-support-verification-colab.ipynb",
+    "stage2_5": "stages/02-evidence-support-verification/notebooks/stage-02-5-hard-negative-support-verification-colab.ipynb",
+    "stage3": "stages/03-confidence-calibration/notebooks/stage-03-confidence-calibration-colab.ipynb",
+    "stage4": "stages/04-unsupported-confidence-control/notebooks/stage-04-unsupported-confidence-control-colab.ipynb",
+    "stage5": "stages/05-retrieval-grounded-qa/notebooks/stage-05-support-constrained-learning-colab.ipynb",
+    "stage6": "stages/06-adaptive-constraint-balancing/notebooks/stage-06-adaptive-constraint-balancing-colab.ipynb",
+    "stage7": "stages/07-risk-budgeted-action-learning/notebooks/stage-07-risk-budgeted-action-learning-colab.ipynb",
+    "stage8": "stages/08-joint-optimization/notebooks/stage-08-joint-optimization-colab.ipynb",
+    "stage8_2": "stages/08-joint-optimization/notebooks/stage-08-2-action-learner-calibrated-support-colab.ipynb",
+    "final_comparison": "analysis/notebooks/final-comparison-colab.ipynb",
+}
+
+
 def load_json(path: Path) -> dict[str, Any]:
     with path.open(encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def notebook_template_path(repo_root: Path, stage_key: str) -> Path | None:
+    relative_path = NOTEBOOK_TEMPLATE_PATHS.get(stage_key)
+    if relative_path is None:
+        return None
+    return repo_root / relative_path
+
+
+def executed_notebook_path(run_dir: Path) -> Path | None:
+    archive_dir = run_dir / "executed-notebook"
+    if not archive_dir.exists():
+        return None
+
+    summary_path = run_dir / "run-summary.json"
+    if summary_path.exists():
+        try:
+            summary = load_json(summary_path)
+        except Exception:
+            summary = {}
+        target = summary.get("executed_notebook_target")
+        if isinstance(target, str) and target:
+            target_name = Path(target).name
+            candidate = archive_dir / target_name
+            if candidate.exists():
+                return candidate
+
+    ipynb_files = sorted(archive_dir.glob("*.ipynb"))
+    if not ipynb_files:
+        return None
+
+    run_name = run_dir.name
+    preferred = sorted(path for path in ipynb_files if run_name in path.name)
+    if preferred:
+        return preferred[0]
+    return ipynb_files[0]
 
 
 def preferred_rank(name: str, preferred_prefixes: tuple[str, ...]) -> int:
@@ -416,6 +467,23 @@ def find_ready_path(canonical_runs: dict[str, dict[str, Any] | None], stage_key:
     return candidate if candidate.exists() else None
 
 
+def complete_runs_missing_executed_notebook(
+    canonical_runs: dict[str, dict[str, Any] | None],
+) -> list[tuple[str, dict[str, Any]]]:
+    missing: list[tuple[str, dict[str, Any]]] = []
+    for spec in STAGE_SPECS:
+        if spec.key == "stage2_5":
+            continue
+        run = canonical_runs.get(spec.key)
+        if run is None or run["status"] != "complete":
+            continue
+        if spec.key not in NOTEBOOK_TEMPLATE_PATHS:
+            continue
+        if executed_notebook_path(run["path"]) is None:
+            missing.append((spec.label, run))
+    return missing
+
+
 def load_comparison_csv(run: dict[str, Any] | None) -> list[dict[str, str]]:
     if run is None:
         return []
@@ -594,6 +662,7 @@ def generate_full_audit(
     comparison_run = canonical_runs.get("final_comparison")
     comparison_csv_rows = load_comparison_csv(comparison_run)
     repo_status = git_worktree_state(repo_root)
+    missing_executed_notebooks = complete_runs_missing_executed_notebook(canonical_runs)
     stage8_run = canonical_runs.get("stage8")
     stage8_row = next((row for row in rows if row["family"] == "stage8"), None)
     stage8_complete = bool(stage8_run and stage8_run["status"] == "complete" and stage8_row is not None)
@@ -660,16 +729,21 @@ def generate_full_audit(
     lines.append("")
     lines.append("## Canonical Artifact Inventory")
     lines.append("")
-    lines.append("| Stage | Canonical run | Storage | Status | Key outputs |")
-    lines.append("| --- | --- | --- | --- | --- |")
+    lines.append("| Stage | Canonical run | Storage | Status | Raw notebook | Executed notebook | Key outputs |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- |")
     for spec in STAGE_SPECS:
         run = canonical_runs.get(spec.key)
+        raw_notebook = notebook_template_path(repo_root, spec.key)
+        raw_notebook_text = f"`{raw_notebook}`" if raw_notebook is not None else "—"
         if run is None:
-            lines.append(f"| {spec.label} | — | — | missing | — |")
+            lines.append(f"| {spec.label} | — | — | missing | {raw_notebook_text} | — | — |")
             continue
         outputs = ", ".join(f"`{path}`" for path in spec.key_output_paths)
+        executed_notebook = executed_notebook_path(run["path"])
+        executed_notebook_text = f"`{executed_notebook}`" if executed_notebook is not None else "missing"
         lines.append(
-            f"| {spec.label} | `{run['name']}` | {run['storage']} | {run['status']} | {outputs} |"
+            f"| {spec.label} | `{run['name']}` | {run['storage']} | {run['status']} | "
+            f"{raw_notebook_text} | {executed_notebook_text} | {outputs} |"
         )
     lines.append("")
     lines.append("## Headline Comparison Metrics")
@@ -698,6 +772,15 @@ def generate_full_audit(
         lines.append(f"- Canonical run: `{run['path']}`")
         lines.append(f"- Storage: {run['storage']}")
         lines.append(f"- Status: {run['status']}")
+        raw_notebook = notebook_template_path(repo_root, stage_key)
+        executed_notebook = executed_notebook_path(run["path"])
+        if raw_notebook is not None:
+            lines.append(f"- Raw repo notebook: `{raw_notebook}`")
+        lines.append(
+            f"- Executed notebook archive: `{executed_notebook}`."
+            if executed_notebook is not None
+            else "- Executed notebook archive: missing."
+        )
 
         if stage_key == "stage1":
             baseline = next((row for row in rows if row["label"] == LABELS["stage1_baseline"]), None)
@@ -823,6 +906,10 @@ def generate_full_audit(
             )
     else:
         lines.append("- No incomplete runs were detected.")
+    if missing_executed_notebooks:
+        lines.append("- Complete runs still missing an archived executed notebook snapshot:")
+        for label, run in missing_executed_notebooks:
+            lines.append(f"  - {label}: `{run['path'] / 'executed-notebook'}`")
     lines.append("")
     lines.append("## Ready-To-Use Paths For The Next Clean Run")
     lines.append("")

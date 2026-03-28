@@ -69,28 +69,28 @@ The cost is that answer extraction quality remains substantially worse than the
 baseline on answerable questions, which gives a clear target for Stage 2 and
 later stages: preserve the abstention gain while recovering answer quality.
 
-\begin{table}[t]
+\begin{table*}[t]
   \centering
-  \caption{Stage 2 support verification on top of the Stage 1 abstain-aware QA
-  system, evaluated on the held-out development split at support threshold
-  $0.25$. All values are percentages.}
+  \caption{Stage 2 and Stage 2.5 support verification on top of the Stage 1
+  abstain-aware QA system, evaluated on the held-out development split.
+  Stage 2.5 retrains the verifier with Stage 1 QA predictions as hard
+  negatives. All values are percentages except the selected support threshold.}
   \label{tab:stage2-main-results}
   \footnotesize
   \renewcommand{\arraystretch}{1.1}
-  \resizebox{\columnwidth}{!}{%
-    \begin{tabular}{@{}lcccccc@{}}
+  \setlength{\tabcolsep}{6pt}
+  \begin{tabular}{@{}lccccccc@{}}
       \toprule
-      & \multicolumn{3}{c}{Verifier} & \multicolumn{3}{c}{End-to-end QA} \\
-      \cmidrule(lr){2-4} \cmidrule(l){5-7}
-      System & Prec. & Rec. & F1 & Ans. F1 & Overall F1 & Unsup. Rate \\
+      & \multicolumn{4}{c}{Verifier} & \multicolumn{3}{c}{End-to-end QA} \\
+      \cmidrule(lr){2-5} \cmidrule(l){6-8}
+      System & Thr. & Prec. & Rec. & F1 & Ans. F1 & Overall F1 & Unsup. Rate \\
       \midrule
-      Stage 1 abstain QA & -- & -- & -- & 66.76 & 69.40 & 27.97 \\
-      Stage 2 gated QA & 66.62 & 99.43 & 79.79 & 66.41 & 69.42 & 27.57 \\
-      Delta vs.\ Stage 1 & -- & -- & -- & -0.35 & +0.03 & -0.40 \\
+      Stage 1 abstain QA & -- & -- & -- & -- & 66.76 & 69.40 & 27.97 \\
+      Stage 2 gated QA & 0.25 & 66.62 & 99.43 & 79.79 & 66.41 & 69.42 & 27.57 \\
+      Stage 2.5 hard-neg.\ gated QA & 0.95 & 67.05 & 98.24 & 79.70 & 65.62 & 69.34 & 26.95 \\
       \bottomrule
-    \end{tabular}%
-  }
-\end{table}
+    \end{tabular}
+\end{table*}
 
 \paragraph{Stage 2 support-verification result.}
 Stage 2 keeps the Stage 1 abstain-aware QA model fixed and adds a verifier over
@@ -104,19 +104,42 @@ end-to-end QA metrics move only slightly: decision-aware overall $F_1$ rises
 from 69.40 to 69.42 and unsupported-answer rate falls from 27.97\% to 27.57\%,
 while answerable $F_1$ slips from 66.76 to 66.41.
 
-\paragraph{How to read the Stage 2 outcome.}
+\paragraph{Stage 2.5 hard-negative repair.}
+Stage 2.5 keeps the same Stage 1 abstain-aware base model and the same gated
+evaluation rule, but retrains the verifier after augmenting its training data
+with answered Stage 1 QA predictions as hard positives and hard negatives.
+In the current run, this adds 72{,}184 QA-derived verifier examples to the
+train split, 7{,}606 to validation, and 6{,}084 to the held-out dev-side
+verification set.
+The repair does make the verifier slightly less permissive:
+dev support precision rises from 66.62\% to 67.05\%, predicted-supported rate
+falls from 98.88\% to 97.07\%, and contradiction rate falls from 33.00\% to
+31.99\%.
+The downstream gated unsupported-answer rate also drops from 27.57\% to
+26.95\%.
+However, support $F_1$ barely changes (79.79 to 79.70), answerable $F_1$
+falls from 66.41 to 65.62, and gated overall $F_1$ slips from 69.42 to 69.34.
+The selected support threshold also moves sharply upward, from 0.25 to 0.95,
+which indicates that the repaired verifier still needs an aggressive cutoff to
+avoid over-trusting answered predictions.
+
+\paragraph{How to read the Stage 2 and Stage 2.5 outcome.}
 The positive result is that the verifier does learn a meaningful support signal
 instead of collapsing completely.
-The limiting result is that this signal does not yet translate into a large
-downstream improvement.
-On the dev split, verifier recall is extremely high at 99.43\%, but precision
-is only 66.62\%, and the model predicts support for 98.88\% of answered cases.
-That makes the current gating policy too permissive: the verifier mostly
-confirms answers rather than filtering unsupported ones.
-As a result, Stage 2 should be read as a systems success but not yet as a
-decisive end-to-end win.
-It narrows the next bottleneck clearly: later stages need better calibration
-and control over when support scores are allowed to suppress or permit answers.
+The limiting result is that neither the original verifier nor the hard-negative
+repair translates into a large downstream improvement.
+Stage 2 clearly over-confirms answers, and Stage 2.5 softens that tendency only
+slightly.
+The repaired verifier is directionally better on precision and contradiction
+rate, but the gains are too small to recover answerable quality or to produce
+a convincing end-to-end jump.
+So Stage 2.5 should be read as a useful repair attempt rather than as a new
+stage that overturns the earlier diagnosis.
+It confirms that easy-negative training data was part of the problem, but not
+the whole problem.
+The larger bottleneck remains the same:
+later stages need stronger control over how support scores are used, or a
+different learning objective altogether.
 
 \paragraph{Representative failure cases.}
 The saved dev predictions make the current bottleneck concrete.
@@ -135,6 +158,418 @@ assigns that answer a support score of only 0.0052 and gates it to
 This is the complementary false-negative support error:
 the verifier can over-penalize short abstract answers even when the QA model is
 already correct.
+Stage 2.5 reduces the aggregate permissiveness of the verifier slightly, but it
+does not remove this qualitative pattern.
 Taken together, these examples match the aggregate metrics:
 the current verifier is strong enough to learn support as a signal, but not yet
 selective enough to improve the final decision reliably.
+
+\begin{table*}[t]
+  \centering
+  \caption{Stage 3 calibration results on the held-out development split.
+  The QA signal is the Stage 1 answer-versus-\abstain\ decision score, and the
+  support signal is the Stage 2 verifier score over answered cases only.
+  Lower is better for ECE, adaptive ECE, MCE, Brier, and threshold gap;
+  higher is better for correlation.}
+  \label{tab:stage3-calibration-results}
+  \small
+  \setlength{\tabcolsep}{7pt}
+  \renewcommand{\arraystretch}{1.1}
+  \begin{tabular}{@{}llcccccc@{}}
+    \toprule
+    Signal & Setting & ECE & Adapt.\ ECE & MCE & Brier & Threshold Gap & Corr. \\
+    \midrule
+    QA decision & Raw & 0.2456 & 0.2456 & 0.3289 & 0.2631 & 0.1122 & 0.1909 \\
+    QA decision & Calibrated & 0.0753 & 0.0753 & 0.1019 & 0.2009 & 0.0890 & 0.2691 \\
+    Support verifier & Raw & 0.3326 & 0.3247 & 0.8838 & 0.3324 & 0.1317 & 0.0778 \\
+    Support verifier & Calibrated & 0.1708 & 0.1686 & 0.2883 & 0.2483 & 0.0894 & 0.1296 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\begin{figure*}[t]
+  \centering
+  \begin{minipage}[t]{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/stage3-qa-reliability.png}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.48\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/stage3-support-reliability.png}
+  \end{minipage}
+  \caption{Stage 3 reliability diagrams on the development split.
+  Left: the Stage 1 abstain-aware QA decision score.
+  Right: the Stage 2 support-verifier score.
+  In both cases, scalar temperature scaling moves the calibrated curve toward
+  the diagonal, but the support signal remains visibly less reliable than the
+  QA decision signal.}
+  \label{fig:stage3-reliability}
+\end{figure*}
+
+\paragraph{Stage 3 calibration result.}
+Stage 3 applies scalar temperature scaling to two score streams without
+retraining the underlying models:
+the Stage 1 answer-versus-\abstain\ decision score and the Stage 2 support
+score.
+Both selected temperatures hit the top of the searched range,
+\(T_{\mathrm{qa}} = 5.0\) and \(T_{\mathrm{sup}} = 5.0\), which is itself a
+useful finding.
+It indicates that both score distributions were substantially too sharp before
+calibration, especially the verifier.
+On the dev split, the raw QA signal has mean confidence 0.9458 against actual
+decision accuracy 0.7002, while the raw support signal has mean confidence
+0.9873 against actual support accuracy 0.6665.
+So before calibration, both modules are strongly overconfident rather than only
+slightly misaligned.
+
+\paragraph{What improved.}
+The QA signal responds well to this simple calibration step.
+Dev QA ECE falls from 0.2456 to 0.0753, MCE falls from 0.3289 to 0.1019,
+Brier score improves from 0.2631 to 0.2009, and the threshold-gap measure
+falls from 0.1122 to 0.0890.
+The support signal also improves materially:
+ECE drops from 0.3326 to 0.1708, adaptive ECE from 0.3247 to 0.1686, MCE from
+0.8838 to 0.2883, Brier score from 0.3324 to 0.2483, and threshold gap from
+0.1317 to 0.0894.
+Figure~\ref{fig:stage3-reliability} shows the same pattern qualitatively.
+Both calibrated curves move closer to the diagonal, and the extreme
+near-certainty behavior of the raw support signal is softened substantially.
+
+\paragraph{What did not improve enough.}
+Stage 3 is not yet a new downstream controller, so the end-to-end answer and
+abstain metrics remain the Stage 2 ones at this stage.
+The key question is therefore not whether overall QA \(F_1\) changed already,
+but whether the confidence signals became good enough to drive a stronger fixed
+policy in Stage 4.
+On that question, the answer is mixed.
+The calibrated QA signal now looks reasonably usable.
+The calibrated support signal is better than before, but it is still weaker
+than QA on every reported calibration metric and its correlation with the true
+support label remains low at 0.1296.
+So Stage 3 succeeds as a post-hoc calibration study, but it also confirms that
+support confidence remains the fragile part of the pipeline.
+
+\paragraph{Stage 3 takeaway.}
+The main finding from Stage 3 is not that temperature scaling solves grounded
+QA by itself.
+The main finding is that the earlier Stage 2 bottleneck was real:
+the verifier's scores were badly overconfident and needed flattening before
+they could be trusted by later stages.
+Simple scalar calibration already fixes much of that overconfidence, but the
+support signal still lags the QA decision signal after calibration.
+This sharpens the next-stage objective considerably:
+Stage 4 should not merely add another heuristic filter, but should combine the
+now-better-calibrated QA and support signals into a tighter unsupported-answer
+controller and test whether that finally produces a meaningful end-to-end gain.
+The later Stage 2.5 hard-negative repair slightly reduces verifier
+permissiveness, but it does not materially change this interpretation.
+Read together, Stages 1, 2, 2.5, and 3 therefore support a broader
+methodological point:
+modular post-hoc tuning can improve grounded QA behavior, but in this setup it
+does not yet close the objective gap between answer correctness, evidence
+support, and abstention quality.
+That is the empirical reason to compare future modular controllers against a
+direct support-constrained learning formulation rather than continuing to add
+modules without changing the learning target.
+
+\paragraph{Stage 4 fixed-controller result.}
+Stage 4 uses the calibrated QA and support signals from Stage 3 and searches a
+fixed controller under a nominal 20\% unsupported-answer budget on validation.
+The selected validation configuration uses support threshold 0.40, QA
+threshold 0.40, joint threshold 0.45, and \(\alpha = 0.90\).
+On the validation split, this configuration satisfies the budget with
+14.30\% unsupported-answer rate and reaches 72.43 decision-aware overall
+\(F_1\).
+On the held-out development split, however, the controller reaches 66.41
+answerable \(F_1\), 69.41 decision-aware overall \(F_1\), 27.59\%
+unsupported-answer rate, 72.96 abstain \(F_1\), 66.61\% supported-answer rate
+among answered cases, and a 50.68\% answer rate.
+
+\paragraph{How to read the Stage 4 result.}
+The key finding is that calibration clearly improves the quality of the
+confidence signals, but the first fixed controller does not turn those better
+signals into a better development-time decision rule.
+Relative to the original Stage 2 gated system, answerable \(F_1\) is
+unchanged at 66.41, overall \(F_1\) slips by 0.01 points from 69.42 to 69.41,
+unsupported-answer rate worsens by 0.02 points from 27.57\% to 27.59\%, and
+abstain \(F_1\) also slips by 0.01 points.
+Supported-answer rate among answered cases and answer rate are likewise almost
+identical.
+So Stage 4 should be read as a useful null result:
+the calibrated controller is validation-feasible, but on development it is
+effectively indistinguishable from the simpler Stage 2 gate.
+That makes the modular story sharper, not weaker:
+calibration matters for score quality, but the first fixed controller still
+fails to leverage that better score behavior into a meaningful end-to-end
+gain.
+
+\begin{table*}[t]
+  \centering
+  \caption{Executed modular and direct-learning checkpoints in the final
+  comparison.
+  Most rows report held-out development results.
+  Stage 3 is omitted because it recalibrates the QA and support scores but does
+  not define a separate end-to-end decision system.
+  Stage 4 is the calibrated fixed-controller baseline, but the strongest
+  executed modular checkpoint remains the original Stage 2 gate by a negligible
+  margin.
+  Stage 6 is evaluated against the Stage 5 learner from which it derives
+  candidate features, Stage 7 is evaluated against the same Stage 5 learner
+  plus the Stage 6 controller features, Stage 8 Hybrid restores calibrated
+  control on top of the Stage 5 answer engine, and Stage 8.2 reports its clean
+  final result on the untouched test split.}
+  \label{tab:stage5-stage6-results}
+  \small
+  \setlength{\tabcolsep}{8pt}
+  \renewcommand{\arraystretch}{1.1}
+  \begin{tabular}{@{}llccc@{}}
+    \toprule
+    System & Split & Answerable F1 & Decision-aware Overall F1 & Unsupported Rate \\
+    \midrule
+    Stage 1 abstain QA & dev & 66.76 & 69.40 & 27.97 \\
+    Stage 2 gated QA & dev & 66.41 & 69.42 & 27.57 \\
+    Stage 2.5 hard-neg.\ gated QA & dev & 65.62 & 69.34 & 26.95 \\
+    Stage 4 fixed controller & dev & 66.41 & 69.41 & 27.59 \\
+    Stage 5 support-constrained learner & dev & 71.40 & 68.28 & 34.84 \\
+    Stage 6 adaptive learner & dev & 69.70 & 67.62 & 34.45 \\
+    Stage 7 risk-budgeted action learner & dev & 69.95 & 67.66 & 34.62 \\
+    Stage 8 hybrid controller & dev & 68.39 & 68.27 & 31.86 \\
+    Stage 8.2 action + calibrated support & test & 70.06 & 68.16 & 33.73 \\
+    \bottomrule
+  \end{tabular}
+\end{table*}
+
+\paragraph{Cross-stage final comparison.}
+The final-comparison notebook aggregates the strongest completed Stage 1 and
+Stage 4--8 Hybrid artifacts into common trade-off plots and one normalized summary
+table.
+On the answerable-\(F_1\)-versus-unsupported frontier, those checkpoints
+separate into two clear regions.
+Stage 1 abstain QA and Stage 4 fixed control both sit near 66.4--66.8
+answerable \(F_1\) with roughly 27.6--28.0\% unsupported-answer rate.
+By contrast, Stages 5--8 Hybrid sit higher, around 68.4--71.4 answerable
+\(F_1\), but only at roughly 31.9--34.8\% unsupported-answer rate.
+So the direct-learning family has not yet moved the frontier outward on the
+held-out development split; it has moved the system into a different operating
+regime.
+Within that final-comparison slice, Stage 4 is the strongest development-time
+overall trade-off, Stage 5 is the answerable-quality leader, and Stage 8 Hybrid
+is the strongest groundedness recovery among the later learned-controller
+variants without reclaiming the modular frontier.
+Across all executed checkpoints in Table~\ref{tab:stage5-stage6-results},
+including Stage 2 and Stage 2.5, no method reaches the nominal 20\%
+unsupported-answer budget on the development split.
+
+\begin{figure*}[t]
+  \centering
+  \begin{minipage}[t]{0.54\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/final-comparison-answerable-f1-vs-unsupported-answer-rate.png}
+  \end{minipage}\hfill
+  \begin{minipage}[t]{0.42\textwidth}
+    \centering
+    \includegraphics[width=\linewidth]{figures/final-comparison-three-metric-frontier-3d.png}
+  \end{minipage}
+  \caption{Notebook-generated final comparison views built from the completed
+  artifacts.
+  Left: the main answerable-\(F_1\)-versus-unsupported-answer frontier, where
+  the Stage 8.2 marker is kept as a clean-split test reference and the learned
+  family rises on answerable quality only by moving into a riskier
+  unsupported-answer regime.
+  Right: a three-metric view over unsupported-answer rate, decision-aware
+  overall \(F_1\), and answerable \(F_1\).
+  Read together, the plots show the same two-regime pattern:
+  the modular side remains safer, while the later learned variants recover more
+  answerable-question quality without yet reaching a better groundedness
+  frontier.}
+  \label{fig:final-comparison-frontier}
+\end{figure*}
+
+\paragraph{Stage 5 standalone result.}
+Stage 5 is intended to compare a jointly trained support-constrained learner
+against the executed modular controller family.
+That comparison is now available directly: Stage 4 provides the intended
+calibrated-controller baseline, and the original Stage 2 gate remains the
+slightly stronger modular checkpoint on development by 0.01 overall \(F_1\).
+In the current run, the selected keep threshold is 0.65.
+On the held-out development split, the learner reaches 71.40 answerable
+$F_1$, 68.28 decision-aware overall $F_1$, 34.84\% unsupported-answer rate,
+71.17 abstain $F_1$, 62.40\% supported-answer rate among answered cases, and a
+58.38\% answer rate.
+The run is also evaluated under a nominal 20\% unsupported-answer budget, which
+it misses by 14.84 points.
+
+\paragraph{What Stage 5 improved and what it worsened.}
+The positive result is clear:
+the support-constrained learner substantially recovers answerable-question
+quality.
+Relative to the Stage 1 abstain-aware model, answerable $F_1$ rises by 4.64
+points, from 66.76 to 71.40.
+Relative to the Stage 2.5 hard-negative gated system, it rises by 5.78 points,
+from 65.62 to 71.40.
+However, the groundedness side moves in the wrong direction.
+Unsupported-answer rate rises from 27.97\% in Stage 1 to 34.84\% in Stage 5,
+and from 26.95\% in Stage 2.5 to 34.84\%.
+That increase is large enough that overall $F_1$ falls below every previously
+executed modular checkpoint, including the 69.41 reached by the calibrated
+Stage 4 controller and the slightly higher 69.42 reached by the original
+Stage 2 gated system.
+
+\paragraph{How to read the current Stage 5 finding.}
+This first Stage 5 run is therefore a useful negative result rather than a
+successful replacement for the modular pipeline.
+Changing the learning target does matter:
+the learner moves the trade-off strongly and recovers answerable extraction
+quality that the abstain-aware and verifier-gated systems had given up.
+But the current objective and thresholding setup do not yet bind unsupported
+answering tightly enough.
+So the direct learner is not automatically safer just because support and
+abstention are trained jointly.
+What it can claim already is sharper:
+the first direct support-constrained objective exposes a different failure mode
+than the modular pipeline, namely that answer quality can be recovered faster
+than unsupported-answer control.
+
+\paragraph{Stage 6 adaptive revision result.}
+Stage 6 is designed as a Stage 5 revision rather than as a new standalone
+pipeline:
+it reuses the trained Stage 5 learner to generate candidate features, then
+learns an adaptive balancer over those candidate-level signals.
+The fairest immediate comparison is still Stage 6 against Stage 5, but the run
+can now also be read against the executed modular baselines, including Stage 4.
+In the current run, the selected candidate threshold is 0.50.
+On the held-out development split, Stage 6 reaches 69.70 answerable $F_1$,
+67.62 decision-aware overall $F_1$, 34.45\% unsupported-answer rate, 71.12
+abstain $F_1$, 62.41\% supported-answer rate among answered cases, and a
+57.77\% answer rate.
+Under the same nominal 20\% unsupported-answer budget used for Stage 5, it
+still misses the target by 14.45 points.
+
+\paragraph{What Stage 6 changed and what it did not.}
+Relative to Stage 5, the adaptive revision makes the system only slightly more
+conservative.
+Answer rate falls from 58.38\% to 57.77\%, and unsupported-answer rate falls by
+0.39 points, from 34.84\% to 34.45\%.
+But the gain is too small to matter at the system level:
+supported-answer rate among kept answers is effectively unchanged, moving only
+from 62.40\% to 62.41\%, while answerable $F_1$ falls by 1.70 points and
+overall $F_1$ falls by 0.66 points.
+So the first adaptive learner trims answering slightly without materially
+improving groundedness.
+
+\paragraph{How to read the current Stage 6 finding.}
+The first Stage 6 run is therefore a second informative negative result rather
+than a breakthrough.
+It shows that adding candidate-level adaptive balancing on top of the current
+Stage 5 pipeline is not sufficient by itself.
+The gap is no longer only that the first direct learner is too permissive; it
+is also that the first adaptive correction changes behavior too weakly to
+recover the unsupported-answer budget or beat the simpler Stage 5 learner.
+What it can claim already is narrower and still useful:
+the current Stage 6 mechanism behaves mostly like a slightly more cautious
+Stage 5, not yet like a new frontier point on the
+utility-versus-groundedness trade-off.
+
+\paragraph{Stage 7 risk-budgeted action result.}
+Stage 7 changes the formulation more aggressively than Stage 6.
+Instead of thresholding independently scored candidates, it treats candidate
+answers and \abstain\ as one action space and learns separate utility and risk
+signals under explicit unsupported-answer and over-abstention budgets.
+In the current run, the selected risk threshold is 0.85.
+On the validation split, that operating point satisfies both target budgets:
+unsupported-answer rate is 19.22\% against a 20\% maximum, over-abstention rate
+is 12.92\% against a 20\% maximum, overall $F_1$ is 73.06, and answerable
+$F_1$ is 69.19.
+On the held-out development split, however, the same operating point reaches
+69.95 answerable $F_1$, 67.66 decision-aware overall $F_1$,
+34.62\% unsupported-answer rate, 71.11 abstain $F_1$, 62.28\%
+supported-answer rate among answered cases, 57.99\% answer rate, and
+18.57\% over-abstention rate.
+
+\paragraph{What Stage 7 changed and what it did not.}
+Relative to Stage 6, Stage 7 improves answerable $F_1$ only slightly, from
+69.70 to 69.95, and overall $F_1$ only marginally, from 67.62 to 67.66.
+At the same time, unsupported-answer rate worsens slightly, from 34.45\% to
+34.62\%, supported-answer rate among answered cases slips from 62.41\% to
+62.28\%, and answer rate rises slightly from 57.77\% to 57.99\%.
+So the action learner does not win simply by refusing more often.
+Its over-abstention rate stays within the nominal 20\% budget, but the
+unsupported-answer budget still fails on development by 14.62 points.
+Relative to Stage 5, Stage 7 is slightly less permissive
+(34.62\% versus 34.84\% unsupported-answer rate), but it still gives back
+1.45 points of answerable $F_1$ and 0.62 points of overall $F_1$.
+
+\paragraph{How to read the current Stage 7 finding.}
+The first Stage 7 run is therefore a third informative negative result rather
+than the long-sought clean direct-learning win.
+The positive result is that the stronger formulation really does solve the
+\emph{validation} problem it was designed for:
+explicit \abstain, explicit risk, and explicit budgets are enough to select an
+operating point that satisfies both validation constraints.
+The limiting result is that this gain does not transfer to the held-out
+development split, where unsupported-answer rate remains essentially unchanged
+from the Stage 5--6 regime.
+So the current bottleneck is no longer just the lack of an explicit action
+space.
+It is the lack of a risk signal whose supported-versus-unsupported separation
+generalizes beyond validation-time threshold selection.
+
+\paragraph{Stage 8 Hybrid result.}
+Stage 8 returns to a modular combination:
+it keeps Stage 5 as the answer engine and adds calibrated Stage 4 control
+signals back on top.
+In the current run, the selected candidate threshold is 0.20.
+On the held-out development split, Stage 8 reaches 68.39 answerable $F_1$,
+68.27 decision-aware overall $F_1$, 31.86\% unsupported-answer rate, 71.71
+abstain $F_1$, 64.27\% supported-answer rate among answered cases, and a
+54.91\% answer rate.
+
+\paragraph{What Stage 8 Hybrid changed and what it did not.}
+Relative to the Stage 5--7 family, the hybrid is meaningfully more
+conservative.
+Unsupported-answer rate falls by 2.98 points relative to Stage 5, by
+2.59 points relative to Stage 6, and by 2.76 points relative to Stage 7.
+That groundedness gain also lifts overall $F_1$ above the Stage 5--7 regime,
+with a 0.61-point improvement over Stage 7.
+But the recovery is still incomplete:
+answerable $F_1$ remains 3.01 points below Stage 5, and the hybrid still
+trails the calibrated Stage 4 controller by 1.14 overall $F_1$ and 4.27 points
+of unsupported-answer rate.
+So restoring calibrated control helps, but it does not yet reclaim the modular
+frontier.
+
+\paragraph{Stage 8.2 clean-split action-learner result.}
+Stage 8.2 keeps Stage 5 as the answer engine, injects calibrated Stage 4
+support into the Stage 7 action learner, and reports its final checkpoint on a
+truly untouched test split.
+In the current run, the selected risk threshold is 0.70.
+On validation, that operating point satisfies the nominal unsupported-answer
+budget with 19.31\% unsupported-answer rate and 72.98 overall $F_1$.
+On the final test split, however, it reaches 70.06 answerable $F_1$,
+68.16 decision-aware overall $F_1$, 33.73\% unsupported-answer rate, 71.09
+abstain $F_1$, 63.28\% supported-answer rate among answered cases, and a
+56.72\% answer rate.
+So the cleaned formulation reproduces the same central pattern under stricter
+evaluation hygiene:
+the controller can satisfy the budget on validation, but the
+supported-versus-unsupported separation still does not transfer tightly enough
+to the final held-out split.
+
+\paragraph{Final chosen learned architecture.}
+The paper's final chosen learned architecture is therefore Stage 8.2, not
+because it is the strongest final operating point, but because it is the
+cleanest executed deep-learning formulation of the full hypothesis.
+It freezes the Stage 5 DistilBERT answer engine as a proposal network,
+rescoring the top candidate spans with a shallow action model that receives
+both answer-quality features and calibrated Stage 4 support features.
+That action model learns separate utility and risk heads for each candidate,
+plus a pooled abstain head over the whole candidate set.
+This architecture is the closest executed system to a true
+support-aware selective predictor:
+the final answer-or-\abstain\ choice is learned directly over a compact action
+space, under explicit unsupported-answer budgets, while still preserving a
+modular calibrated support signal.
+The empirical result is still sobering.
+Figure~\ref{fig:final-comparison-frontier} shows that the architecture moves
+the learned family toward better answerable \(F_1\), but not yet to a safer
+overall frontier than Stage 4.

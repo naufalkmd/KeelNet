@@ -22,19 +22,19 @@ It is the canonical merged experiment doc and replaces the older standalone stat
 
 ## Canonical Artifact Inventory
 
-| Stage | Canonical run | Storage | Status | Key outputs |
-| --- | --- | --- | --- | --- |
-| Stage 1 | `codex-stage1-live-20260326-014652` | Drive | complete | `baseline_eval.json`, `abstain_eval.json`, `baseline`, `abstain` |
-| Stage 2 | `naufal-stage2-v2` | Drive | complete | `verifier_eval.json`, `verifier` |
-| Stage 2.5 | `naufal-stage2-5-v1` | local | complete | `verifier_eval.json`, `verifier` |
-| Stage 3 | `naufal-stage3-v1` | Drive | complete | `calibration_eval.json`, `qa_dev_reliability.png`, `support_dev_reliability.png` |
-| Stage 4 | `naufal-stage4-v1` | Drive | complete | `control_eval.json` |
-| Stage 5 | `naufal-stage5-v1` | Drive | complete | `learner_eval.json`, `learner` |
-| Stage 6 | `naufal-stage6-v1` | Drive | complete | `balance_eval.json`, `balancer` |
-| Stage 7 | `naufal-stage7-v1` | Drive | complete | `risk_action_eval.json`, `risk-action-learner` |
-| Stage 8 Hybrid | `naufal-stage8-v1` | Drive | complete | `hybrid_eval.json`, `hybrid-controller` |
-| Stage 8.2 | `naufal-stage8-2-v1` | Drive | complete | `hybrid_eval.json`, `stage8-2-action-learner` |
-| Final Comparison | `naufal-final-comparison-v3` | Drive | complete | `comparison_metrics.csv`, `comparison_summary.json` |
+| Stage | Canonical run | Storage | Status | Raw notebook | Executed notebook | Key outputs |
+| --- | --- | --- | --- | --- | --- | --- |
+| Stage 1 | `codex-stage1-live-20260326-014652` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/01-grounded-abstention-baseline/notebooks/stage-01-grounded-abstention-baseline-colab.ipynb` | missing | `baseline_eval.json`, `abstain_eval.json`, `baseline`, `abstain` |
+| Stage 2 | `naufal-stage2-v2` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/02-evidence-support-verification/notebooks/stage-02-evidence-support-verification-colab.ipynb` | missing | `verifier_eval.json`, `verifier` |
+| Stage 2.5 | `naufal-stage2-5-v1` | local | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/02-evidence-support-verification/notebooks/stage-02-5-hard-negative-support-verification-colab.ipynb` | missing | `verifier_eval.json`, `verifier` |
+| Stage 3 | `naufal-stage3-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/03-confidence-calibration/notebooks/stage-03-confidence-calibration-colab.ipynb` | missing | `calibration_eval.json`, `qa_dev_reliability.png`, `support_dev_reliability.png` |
+| Stage 4 | `naufal-stage4-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/04-unsupported-confidence-control/notebooks/stage-04-unsupported-confidence-control-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/stage4_colab/naufal-stage4-v1/executed-notebook/naufal-stage4-v1-executed.ipynb` | `control_eval.json` |
+| Stage 5 | `naufal-stage5-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/05-retrieval-grounded-qa/notebooks/stage-05-support-constrained-learning-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/stage5_colab/naufal-stage5-v1/executed-notebook/naufal-stage5-v1-executed.ipynb` | `learner_eval.json`, `learner` |
+| Stage 6 | `naufal-stage6-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/06-adaptive-constraint-balancing/notebooks/stage-06-adaptive-constraint-balancing-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/stage6_colab/naufal-stage6-v1/executed-notebook/naufal-stage6-v1-executed.ipynb` | `balance_eval.json`, `balancer` |
+| Stage 7 | `naufal-stage7-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/07-risk-budgeted-action-learning/notebooks/stage-07-risk-budgeted-action-learning-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/stage7_colab/naufal-stage7-v1/executed-notebook/naufal-stage7-v1-executed.ipynb` | `risk_action_eval.json`, `risk-action-learner` |
+| Stage 8 Hybrid | `naufal-stage8-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/08-joint-optimization/notebooks/stage-08-joint-optimization-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/stage8_colab/naufal-stage8-v1/executed-notebook/naufal-stage8-v1-executed.ipynb` | `hybrid_eval.json`, `hybrid-controller` |
+| Stage 8.2 | `naufal-stage8-2-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/08-joint-optimization/notebooks/stage-08-2-action-learner-calibrated-support-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/stage8_2_colab/naufal-stage8-2-v1/executed-notebook/naufal-stage8-2-v1-executed.ipynb` | `hybrid_eval.json`, `stage8-2-action-learner` |
+| Final Comparison | `naufal-final-comparison-v3` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/analysis/notebooks/final-comparison-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/final_comparison_colab/naufal-final-comparison-v3/executed-notebook/naufal-final-comparison-v3-executed.ipynb` | `comparison_metrics.csv`, `comparison_summary.json` |
 
 ## Headline Comparison Metrics
 
@@ -58,6 +58,8 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Canonical run: `/mnt/g/My Drive/KeelNet/artifacts/stage1_colab/codex-stage1-live-20260326-014652`
 - Storage: Drive
 - Status: complete
+- Raw repo notebook: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/01-grounded-abstention-baseline/notebooks/stage-01-grounded-abstention-baseline-colab.ipynb`
+- Executed notebook archive: missing.
 - Baseline dev: `overall_f1 = 42.35`, `answerable_f1 = 84.82`, `unsupported_answer_rate = 100.00`.
 - Abstain dev: `overall_f1 = 69.40`, `answerable_f1 = 66.76`, `unsupported_answer_rate = 27.97`.
 
@@ -66,6 +68,8 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Canonical run: `/mnt/g/My Drive/KeelNet/artifacts/stage2_colab/naufal-stage2-v2`
 - Storage: Drive
 - Status: complete
+- Raw repo notebook: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/02-evidence-support-verification/notebooks/stage-02-evidence-support-verification-colab.ipynb`
+- Executed notebook archive: missing.
 - Gated dev: `overall_f1 = 69.42`, `answerable_f1 = 66.41`, `unsupported_answer_rate = 27.57`.
 - Dev support verifier: `support_f1 = 79.79`, `support_accuracy = 66.62`.
 
@@ -74,6 +78,8 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Canonical run: `/content/KeelNet-local/artifacts/stage2_5_colab/naufal-stage2-5-v1`
 - Storage: local
 - Status: complete
+- Raw repo notebook: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/02-evidence-support-verification/notebooks/stage-02-5-hard-negative-support-verification-colab.ipynb`
+- Executed notebook archive: missing.
 - Gated dev: `overall_f1 = 69.34`, `answerable_f1 = 65.62`, `unsupported_answer_rate = 26.95`.
 - Dev support verifier: `support_f1 = 79.70`, `support_accuracy = 66.85`.
 
@@ -82,6 +88,8 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Canonical run: `/mnt/g/My Drive/KeelNet/artifacts/stage3_colab/naufal-stage3-v1`
 - Storage: Drive
 - Status: complete
+- Raw repo notebook: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/03-confidence-calibration/notebooks/stage-03-confidence-calibration-colab.ipynb`
+- Executed notebook archive: missing.
 - Dev QA ECE improved from `0.2456` raw to `0.0753` calibrated.
 - Dev support ECE improved from `0.3326` raw to `0.1708` calibrated.
 
@@ -90,6 +98,8 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Canonical run: `/mnt/g/My Drive/KeelNet/artifacts/stage4_colab/naufal-stage4-v1`
 - Storage: Drive
 - Status: complete
+- Raw repo notebook: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/04-unsupported-confidence-control/notebooks/stage-04-unsupported-confidence-control-colab.ipynb`
+- Executed notebook archive: `/mnt/g/My Drive/KeelNet/artifacts/stage4_colab/naufal-stage4-v1/executed-notebook/naufal-stage4-v1-executed.ipynb`.
 - Dev: `overall_f1 = 69.41`, `answerable_f1 = 66.41`, `unsupported_answer_rate = 27.59`.
 - Selected config: `support_threshold = 0.4`, `qa_threshold = 0.4`, `joint_threshold = 0.45`, `alpha = 0.9`.
 
@@ -98,6 +108,8 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Canonical run: `/mnt/g/My Drive/KeelNet/artifacts/stage5_colab/naufal-stage5-v1`
 - Storage: Drive
 - Status: complete
+- Raw repo notebook: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/05-retrieval-grounded-qa/notebooks/stage-05-support-constrained-learning-colab.ipynb`
+- Executed notebook archive: `/mnt/g/My Drive/KeelNet/artifacts/stage5_colab/naufal-stage5-v1/executed-notebook/naufal-stage5-v1-executed.ipynb`.
 - Dev: `overall_f1 = 68.28`, `answerable_f1 = 71.40`, `unsupported_answer_rate = 34.84`.
 
 ### Stage 6
@@ -105,6 +117,8 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Canonical run: `/mnt/g/My Drive/KeelNet/artifacts/stage6_colab/naufal-stage6-v1`
 - Storage: Drive
 - Status: complete
+- Raw repo notebook: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/06-adaptive-constraint-balancing/notebooks/stage-06-adaptive-constraint-balancing-colab.ipynb`
+- Executed notebook archive: `/mnt/g/My Drive/KeelNet/artifacts/stage6_colab/naufal-stage6-v1/executed-notebook/naufal-stage6-v1-executed.ipynb`.
 - Dev: `overall_f1 = 67.62`, `answerable_f1 = 69.70`, `unsupported_answer_rate = 34.45`.
 
 ### Stage 7
@@ -112,6 +126,8 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Canonical run: `/mnt/g/My Drive/KeelNet/artifacts/stage7_colab/naufal-stage7-v1`
 - Storage: Drive
 - Status: complete
+- Raw repo notebook: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/07-risk-budgeted-action-learning/notebooks/stage-07-risk-budgeted-action-learning-colab.ipynb`
+- Executed notebook archive: `/mnt/g/My Drive/KeelNet/artifacts/stage7_colab/naufal-stage7-v1/executed-notebook/naufal-stage7-v1-executed.ipynb`.
 - Dev: `overall_f1 = 67.66`, `answerable_f1 = 69.95`, `unsupported_answer_rate = 34.62`.
 - Dev over-abstain rate: `18.57`.
 
@@ -120,6 +136,8 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Canonical run: `/mnt/g/My Drive/KeelNet/artifacts/stage8_colab/naufal-stage8-v1`
 - Storage: Drive
 - Status: complete
+- Raw repo notebook: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/08-joint-optimization/notebooks/stage-08-joint-optimization-colab.ipynb`
+- Executed notebook archive: `/mnt/g/My Drive/KeelNet/artifacts/stage8_colab/naufal-stage8-v1/executed-notebook/naufal-stage8-v1-executed.ipynb`.
 - Dev: `overall_f1 = 68.27`, `answerable_f1 = 68.39`, `unsupported_answer_rate = 31.86`.
 
 ### Stage 8.2
@@ -127,6 +145,8 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Canonical run: `/mnt/g/My Drive/KeelNet/artifacts/stage8_2_colab/naufal-stage8-2-v1`
 - Storage: Drive
 - Status: complete
+- Raw repo notebook: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/08-joint-optimization/notebooks/stage-08-2-action-learner-calibrated-support-colab.ipynb`
+- Executed notebook archive: `/mnt/g/My Drive/KeelNet/artifacts/stage8_2_colab/naufal-stage8-2-v1/executed-notebook/naufal-stage8-2-v1-executed.ipynb`.
 - Test: `overall_f1 = 68.16`, `answerable_f1 = 70.06`, `unsupported_answer_rate = 33.73`.
 - Test over-abstain rate: `20.23`.
 - Selected risk threshold: `0.70`.
@@ -148,6 +168,10 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - `/content/KeelNet-local/artifacts/stage4_colab/naufal-stage4-v1` is `partial` under `local`.
 - `/content/KeelNet-local/artifacts/stage4_colab/yourname-stage4-v1` is `metadata-only` under `local`.
 - `/content/KeelNet-local/artifacts/stage4_colab/yourname-stage4-v2` is `metadata-only` under `local`.
+- Complete runs still missing an archived executed notebook snapshot:
+  - Stage 1: `/mnt/g/My Drive/KeelNet/artifacts/stage1_colab/codex-stage1-live-20260326-014652/executed-notebook`
+  - Stage 2: `/mnt/g/My Drive/KeelNet/artifacts/stage2_colab/naufal-stage2-v2/executed-notebook`
+  - Stage 3: `/mnt/g/My Drive/KeelNet/artifacts/stage3_colab/naufal-stage3-v1/executed-notebook`
 
 ## Ready-To-Use Paths For The Next Clean Run
 

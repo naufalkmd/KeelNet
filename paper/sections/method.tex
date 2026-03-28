@@ -208,6 +208,21 @@ The result is a support-label dataset over tuples
 \((q, p, a)\), where \(q\) is the question, \(p\) is the passage, and \(a\) is
 a candidate answer.
 
+\paragraph{Stage 2.5 hard-negative repair.}
+The original Stage 2 verifier is trained mostly on gold answers and sampled
+unsupported spans.
+That is useful for learning a first support signal, but it leaves a mismatch
+between training time and deployment time, because the verifier is evaluated on
+actual Stage 1 QA predictions rather than on random span negatives.
+Stage 2.5 narrows that mismatch by adding verifier examples built from the
+Stage 1 abstain-aware model's answered predictions.
+For each answered prediction \(\hat{a}\), the pipeline adds a verifier record
+\((q, p, \hat{a})\) and labels it as supported only if the source example is
+answerable and \(\hat{a}\) reaches the same answer-overlap support criterion
+used downstream.
+This makes the verifier see harder positives and harder negatives that are much
+closer to the answers it must judge at inference time.
+
 \paragraph{Verifier input and model.}
 The verifier formats the first sequence as a short hypothesis-like query,
 \begin{equation}
@@ -258,6 +273,644 @@ rate.
 This reflects the Stage 2 question directly:
 not only whether support is learnable, but whether a learned support signal can
 improve the final answer-versus-\abstain\ decision.
+Stage 2.5 keeps the same downstream selection rule so that any gain can be
+attributed to verifier supervision rather than to a different controller.
+
+\subsection{Revised problem formulation: support-constrained selective prediction}
+
+The early stages motivate a reformulation of the project objective.
+Up to Stage 3, the system is intentionally modular:
+the QA model is trained first, the verifier is trained second, and calibration
+is fit after both models are frozen.
+That modular structure is useful for diagnosis, but it also leaves the final
+decision objective implicit.
+The system is still learned mainly for answer prediction and then adjusted
+afterward with verifier thresholds and calibrated score transformations.
+
+The empirical pattern from Stages 1, 2, 2.5, and 3 suggests that this post-hoc modular path
+has limited headroom in the current setting.
+Stage 1 improves abstention behavior but sacrifices answerable-question
+quality, Stage 2 learns support but changes end-to-end QA only marginally, and
+Stage 3 improves score reliability without changing the underlying decision
+objective.
+This motivates a cleaner formulation in which evidence-grounded QA is treated
+as a constrained selective prediction problem rather than as answer extraction
+followed by separate filters.
+
+Let the final system choose either an answer \(a\) or abstention
+\(\varnothing\) for each question-passage pair \((q, p)\).
+Define a task utility
+\(U(\hat{y}, y, p)\)
+that rewards a correct supported answer, penalizes an unsupported answer more
+strongly, and penalizes unnecessary abstention more mildly.
+The next-stage learning problem can then be written abstractly as
+\begin{align}
+  \max_{\theta} \quad & \mathbb{E}\left[ U(\hat{y}_{\theta}, y, p) \right] \\
+  \text{s.t.} \quad &
+  R_{\mathrm{unsup}}(\theta) \le \tau_{\mathrm{u}}, \\
+  &
+  R_{\mathrm{overabs}}(\theta) \le \tau_{\mathrm{a}},
+\end{align}
+where \(R_{\mathrm{unsup}}\) is unsupported-answer risk and
+\(R_{\mathrm{overabs}}\) is unnecessary-abstention risk.
+In words:
+the system should maximize answer utility while staying within an explicit
+groundedness budget.
+
+A practical surrogate for this idea is a Lagrangian objective
+\begin{equation}
+  \mathcal{L}_{\mathrm{total}}
+  =
+  \mathcal{L}_{\mathrm{ans}}
+  +
+  \lambda_{\mathrm{u}} \mathcal{L}_{\mathrm{unsup}}
+  +
+  \lambda_{\mathrm{a}} \mathcal{L}_{\mathrm{overabs}},
+\end{equation}
+where \(\mathcal{L}_{\mathrm{ans}}\) is the standard answer loss,
+\(\mathcal{L}_{\mathrm{unsup}}\) penalizes unsupported answering, and
+\(\mathcal{L}_{\mathrm{overabs}}\) penalizes abstaining when a supported
+correct answer was available.
+This does not require a claim about a new universal learning law.
+Its contribution is narrower and more defensible:
+it makes the project's true target explicit instead of treating support and
+abstention only as post-hoc corrections to answer accuracy.
+
+\paragraph{A feasible deep-learning instantiation for Stage 5.}
+The Stage 5 comparison does not require a new backbone or a new dataset.
+It can be realized with the same encoder family already used in earlier
+stages, but with a different training objective and a tighter coupling between
+answer extraction, support, and abstention.
+Concretely, let
+\(x = [\mathrm{CLS}], q, [\mathrm{SEP}], p, [\mathrm{SEP}]\)
+and let a shared encoder produce contextual states
+\(h_1, \dots, h_T = \mathrm{Enc}_{\theta}(x)\).
+Stage 5 then augments the standard extractive QA heads with two additional
+binary decision heads so that answer extraction, support, and abstention are
+learned jointly from the same representation.
+The model exposes:
+\begin{itemize}[leftmargin=1.25em]
+  \item span logits
+  \(z^{\mathrm{s}}_t = {w^{\mathrm{s}}}^\top h_t + b^{\mathrm{s}}\)
+  and
+  \(z^{\mathrm{e}}_t = {w^{\mathrm{e}}}^\top h_t + b^{\mathrm{e}}\)
+  for answer start and end positions,
+  \item an abstention logit
+  \(z^{\varnothing} = {w^{\varnothing}}^\top h_{\mathrm{CLS}} + b^{\varnothing}\),
+  and
+  \item a support logit
+  \(z^{\mathrm{sup}} = {w^{\mathrm{sup}}}^\top h_{\mathrm{CLS}} + b^{\mathrm{sup}}\).
+\end{itemize}
+Define
+\(p_{\mathrm{abs}} = \sigma(z^{\varnothing})\)
+and
+\(p_{\mathrm{sup}} = \sigma(z^{\mathrm{sup}})\).
+Let
+\(y_{\mathrm{sup}} \in \{0,1\}\)
+denote whether the gold answer is supported by the provided passage, and let
+\(y_{\mathrm{keep}} \in \{0,1\}\)
+denote whether the final system should emit an answer rather than
+\abstain.
+In the current single-passage setting, the two coincide:
+\(y_{\mathrm{keep}} = y_{\mathrm{sup}} = 1\)
+for answerable supported examples and
+\(y_{\mathrm{keep}} = y_{\mathrm{sup}} = 0\)
+for unanswerable or unsupported cases.
+The model then defines a differentiable keep probability
+\begin{equation}
+  p_{\mathrm{keep}}
+  =
+  \left(1 - p_{\mathrm{abs}}\right) p_{\mathrm{sup}},
+\end{equation}
+which operationalizes the idea that an answer should survive only when the
+model is simultaneously unwilling to abstain and confident that the answer is
+supported.
+
+A practical Stage 5 surrogate objective is then
+\begin{align}
+  \mathcal{L}_{\mathrm{stage5}}
+  &=
+  \mathcal{L}_{\mathrm{span}}
+  +
+  \lambda_{\mathrm{k}} \mathcal{L}_{\mathrm{keep}}
+  +
+  \lambda_{\mathrm{sup}} \mathcal{L}_{\mathrm{sup}}, \\
+  \mathcal{L}_{\mathrm{span}}
+  &=
+  y_{\mathrm{keep}}
+  \left[
+    \mathrm{CE}(z^{\mathrm{s}}, i^{*})
+    +
+    \mathrm{CE}(z^{\mathrm{e}}, j^{*})
+  \right], \\
+  \mathcal{L}_{\mathrm{keep}}
+  &=
+  - \alpha y_{\mathrm{keep}} \log p_{\mathrm{keep}}
+  - \beta \left(1-y_{\mathrm{keep}}\right)\log\!\left(1-p_{\mathrm{keep}}\right), \\
+  \mathcal{L}_{\mathrm{sup}}
+  &=
+  \mathrm{BCE}\!\left(p_{\mathrm{sup}}, y_{\mathrm{sup}}\right),
+\end{align}
+with \(\beta > \alpha\) so that unsupported answering is penalized more
+heavily than unnecessary abstention.
+This is the deep-learning form of the constrained objective above:
+\(\mathcal{L}_{\mathrm{span}}\) preserves standard extractive QA supervision,
+\(\mathcal{L}_{\mathrm{keep}}\) learns the final answer-versus-\abstain\
+decision under asymmetric cost, and
+\(\mathcal{L}_{\mathrm{sup}}\) keeps the support head explicitly grounded.
+The important difference from the modular pipeline is that these terms are
+optimized jointly through the shared encoder instead of being trained in
+separate stages and combined only at inference time.
+
+This formulation is feasible in the current project for two reasons.
+First, every term is differentiable with respect to the model outputs, so the
+whole objective can be optimized end to end with standard gradient-based
+training.
+Second, the required supervision is already available or can be derived from
+the current task setup:
+gold spans provide \((i^{*}, j^{*})\), unanswerable examples supervise
+abstention, and the support target can be constructed from the same
+answerable-versus-unsupported labeling logic already used in Stages 2 and 3.
+So Stage 5 is not a speculative architectural leap.
+It is a controlled change in the learning objective that can be tested under
+matched backbone, data, and evaluation conditions.
+
+\subsection{Stage 6 as Stage 5 v2: answer-conditioned adaptive constraint balancing}
+
+The current Stage 5 learner establishes that direct support-constrained
+learning can move the answer-versus-grounding trade-off, but the first run also
+shows a specific weakness:
+answerable-question quality improves faster than unsupported-answer control.
+That suggests that the next learning revision should not be treated as an
+entirely new stage family.
+It should be treated as a second-generation version of Stage 5 itself.
+Stage 6 is therefore best defined as \emph{Stage 5 v2}:
+the same backbone and dataset regime, but with better-aligned support
+supervision and adaptive constraint handling.
+
+The key architectural change is that support should become
+\emph{answer-conditioned}.
+Instead of predicting support only from the question-passage representation,
+let the Stage 6 learner score a small set of candidate spans
+\(a_1, \dots, a_K\)
+proposed by the span head.
+For each candidate, construct
+\(
+  x_k = [\mathrm{CLS}], q, [\mathrm{SEP}], a_k, [\mathrm{SEP}], p, [\mathrm{SEP}]
+\)
+and compute a candidate-conditioned representation
+\(
+  g_k = \mathrm{Enc}_{\theta}(x_k)
+\).
+Stage 6 then predicts:
+\begin{itemize}[leftmargin=1.25em]
+  \item a support logit
+  \(z_k^{\mathrm{sup}}\)
+  for whether candidate \(a_k\) is actually supported by the passage,
+  \item a keep logit
+  \(z_k^{\mathrm{keep}}\)
+  for whether the final system should emit \(a_k\) rather than \abstain, and
+  \item the original span logits from the shared extractive QA head.
+\end{itemize}
+This follows the selective prediction literature's core lesson that the
+selection mechanism should be learned end to end and tied to the actual
+prediction target, not only to a generic confidence proxy
+\citep{geifman2019selectivenet,liu2019deep,yoshikawa2023selectivelama,srinivasan2024selective}.
+
+The supervision should also become harder and more realistic than in the
+current Stage 5 setup.
+Positive candidates are gold supported spans.
+Negative candidates should include model-predicted unsupported spans, lexical
+confounders from the same passage, and answerable-but-incorrect spans that are
+plausible enough to survive the base span head.
+This turns support learning into a candidate-level discrimination problem rather
+than a passage-level answerability signal.
+It also aligns Stage 6 more closely with the calibration literature in QA,
+which shows that confidence becomes useful only when it separates correct from
+incorrect answers at the answer level
+\citep{jiang2021how,zhang2021knowing,si2022reexamining}.
+
+Under this design, a practical Stage 6 objective is
+\begin{align}
+  \mathcal{L}_{\mathrm{stage6}}
+  &=
+  \mathcal{L}_{\mathrm{span}}
+  +
+  \lambda_{\mathrm{sup}} \mathcal{L}_{\mathrm{sup}}^{\mathrm{cand}}
+  +
+  \lambda_{\mathrm{keep}} \mathcal{L}_{\mathrm{keep}}^{\mathrm{cand}}
+  +
+  \lambda_{\mathrm{rank}} \mathcal{L}_{\mathrm{rank}} \\
+  &\quad
+  +
+  \mu_{\mathrm{u}} \left[\hat{R}_{\mathrm{unsup}} - \tau_{\mathrm{u}}\right]_{+}
+  +
+  \mu_{\mathrm{a}} \left[\hat{R}_{\mathrm{overabs}} - \tau_{\mathrm{a}}\right]_{+},
+\end{align}
+where
+\(\mathcal{L}_{\mathrm{sup}}^{\mathrm{cand}}\)
+is candidate-level support supervision,
+\(\mathcal{L}_{\mathrm{keep}}^{\mathrm{cand}}\)
+learns answer versus \abstain\ over candidates,
+\(\mathcal{L}_{\mathrm{rank}}\)
+encourages supported gold spans to outrank hard unsupported candidates, and the
+final two terms penalize explicit budget violations for unsupported answering
+and over-abstention.
+The quantities
+\(\hat{R}_{\mathrm{unsup}}\)
+and
+\(\hat{R}_{\mathrm{overabs}}\)
+are batch-level surrogates for the two risks.
+This follows the constrained-optimization view that real operating budgets
+should be represented directly in the learning problem rather than only
+enforced after training by threshold search \citep{cotter2019optimization}.
+
+The balancing coefficients should also become adaptive instead of fixed.
+One option is to update the dual variables online,
+\begin{align}
+  \mu_{\mathrm{u}}
+  &\leftarrow
+  \left[\mu_{\mathrm{u}} + \eta\left(\hat{R}_{\mathrm{unsup}} - \tau_{\mathrm{u}}\right)\right]_{+}, \\
+  \mu_{\mathrm{a}}
+  &\leftarrow
+  \left[\mu_{\mathrm{a}} + \eta\left(\hat{R}_{\mathrm{overabs}} - \tau_{\mathrm{a}}\right)\right]_{+},
+\end{align}
+so that unsupported-answer pressure automatically increases when the learner
+violates the groundedness budget.
+Another option is to adapt the task-loss weights themselves by uncertainty-based
+weighting or gradient balancing
+\citep{kendall2018multi,chen2018gradnorm}.
+In either case, the main point is the same:
+Stage 6 should not merely reuse the Stage 5 loss with different constants.
+It should let the optimization react when the learner becomes too permissive or
+too refusal-heavy.
+
+So Stage 6 is no longer just a vague ``adaptive balancing'' idea.
+It is a concrete, paper-facing Stage 5 revision:
+candidate-conditioned support scoring, model-mined hard negatives, and
+adaptive constraint multipliers under matched backbone and data conditions.
+If it works, the gain is attributable to better-aligned supervision and
+constraint handling rather than to extra model scale or a looser evaluation
+setup.
+
+\subsection{Stage 7: risk-budgeted action learning over candidates}
+
+The current Stage 6 design still leaves one structural weakness in place:
+it scores candidate answers independently and then applies a threshold to the
+best one.
+That means the final system is still not learning the full decision problem in
+one step.
+It learns candidate scores first and only afterward decides whether any answer
+should survive.
+Because Stage 6 remained too weak in the first run, the next step is not
+another small loss-weight adjustment.
+It changes the decision formulation itself.
+
+Stage 7 is best defined as a \emph{risk-budgeted action learner}.
+Given a question-passage pair \((q,p)\), let
+\(\mathcal{A}(q,p)=\{a_1,\dots,a_K,\varnothing\}\)
+be the action set consisting of the top \(K\) candidate spans plus an explicit
+\abstain\ action \(\varnothing\).
+For each answer candidate \(a_k\), Stage 7 computes an answer-conditioned
+representation \(g_k\) as in Stage 6.
+It then predicts two separate quantities:
+\begin{align}
+  u_k &= f_{\mathrm{util}}(g_k), \\
+  c_k &= f_{\mathrm{risk}}(g_k),
+\end{align}
+where \(u_k\) is a utility score for answering with \(a_k\) and \(c_k\) is a
+risk score for how likely that answer is to be unsupported.
+The abstain action receives its own learned utility score
+\(u_{\varnothing}\),
+while its unsupported-answer cost is fixed to zero by construction.
+
+The final decision is made over actions, not over candidates plus a later gate:
+\begin{equation}
+  \hat{a}
+  =
+  \arg\max_{a \in \mathcal{A}(q,p)}
+  \left[
+    u(a) - \lambda_{\mathrm{u}} c(a)
+  \right],
+\end{equation}
+with \(c(\varnothing)=0\).
+To prevent obviously unsafe answers from slipping through, Stage 7 also keeps a
+hard deployment shield:
+\begin{equation}
+  \hat{y}
+  =
+  \begin{cases}
+    \abstain, & \text{if } c(\hat{a}) > \rho, \\
+    \hat{a}, & \text{otherwise,}
+  \end{cases}
+\end{equation}
+where \(\rho\) is a validation-selected maximum tolerated answer risk.
+This makes abstention an explicit competitor in the action space rather than a
+thresholded afterthought.
+
+The training signal should likewise separate utility from risk.
+For answerable examples, the correct action is the supported gold answer span.
+For unanswerable examples, the correct action is \(\varnothing\).
+Let \(y^{\mathrm{act}}\) denote the gold action and let
+\(\hat{R}_{\mathrm{unsup}}\)
+and
+\(\hat{R}_{\mathrm{overabs}}\)
+be batch-level surrogates for unsupported answering and unnecessary
+abstention.
+A practical Stage 7 objective is then
+\begin{align}
+  \mathcal{L}_{\mathrm{stage7}}
+  &=
+  \mathcal{L}_{\mathrm{act}}
+  +
+  \lambda_{\mathrm{sup}} \mathcal{L}_{\mathrm{sup}}^{\mathrm{cand}}
+  +
+  \mu_{\mathrm{u}} \left[\hat{R}_{\mathrm{unsup}} - \tau_{\mathrm{u}}\right]_{+} \\
+  &\quad +
+  \mu_{\mathrm{a}} \left[\hat{R}_{\mathrm{overabs}} - \tau_{\mathrm{a}}\right]_{+}
+  +
+  \lambda_{\mathrm{tail}} \mathcal{L}_{\mathrm{tail}},
+\end{align}
+where \(\mathcal{L}_{\mathrm{act}}\) is cross-entropy over the
+\(K+1\)-way action space and
+\(\mathcal{L}_{\mathrm{tail}}\)
+upweights the highest-risk answered negatives so the learner focuses on the
+confident unsupported answers that matter most operationally.
+The key shift is that the model no longer asks only
+``which span looks best?''
+It asks
+``which action maximizes utility while staying within the risk budget?''
+
+The dual variables are also updated explicitly rather than only through a
+single negative-class weight.
+In the spirit of constrained optimization and safe RL, Stage 7 increases
+\(\mu_{\mathrm{u}}\)
+when unsupported-answer cost exceeds budget and increases
+\(\mu_{\mathrm{a}}\)
+when the system becomes too refusal-heavy
+\citep{cotter2019optimization,liu2022cvpo}.
+This does not turn the project into reinforcement learning:
+the setting remains supervised and one-step.
+But it does import the most useful safe-RL lesson into the current QA regime,
+namely that reward-like utility and safety-like cost should be optimized
+together under an explicit budget rather than only reconciled by threshold
+search after training.
+
+Under this formulation, Stage 7 is not ``more Stage 6.''
+It is the first stage that treats grounded QA as a genuine
+utility-versus-risk action problem.
+If it succeeds, the gain is attributable to a better decision formulation:
+explicit abstain action, explicit risk head, explicit budgets, and explicit
+dual updates.
+The first Stage 7 run now makes the diagnostic value concrete:
+the selected risk threshold satisfies both validation budgets, but the same
+operating point still yields 34.62\% unsupported-answer rate on the held-out
+development split.
+So the remaining bottleneck is no longer just the lack of an explicit action
+space or explicit dual updates.
+It is that the learned risk signal still does not generalize tightly enough
+beyond validation-time selection.
+
+\subsection{Stage 8 Hybrid and Stage 8.2: final learned architecture}
+
+Stage 8 asks a narrower question than Stage 7:
+if the Stage 5 learner is already good at proposing plausible spans, and
+Stage 4 is already good at producing calibrated groundedness signals, should
+the final system learn only the last decision layer instead of retraining the
+entire QA stack?
+That leads to two closely related variants.
+Stage 8 Hybrid restores calibrated control on top of the frozen Stage 5 answer
+engine.
+Stage 8.2 keeps the same frozen answer engine, but replaces the fixed final
+controller with a small risk-budgeted action network that also consumes the
+calibrated Stage 4 support signal.
+Among the learned systems, Stage 8.2 is the final chosen architecture because
+it is the cleanest executed comparison of learned action selection plus
+calibrated evidence support under a clean final split.
+
+\paragraph{Frozen candidate generator.}
+Stage 8.2 does not retrain the Stage 5 DistilBERT QA encoder.
+Instead, the Stage 5 checkpoint is used as a frozen candidate generator.
+For each example, it produces a bounded candidate set
+\(\mathcal{A}(q,p)=\{a_1,\dots,a_K,\varnothing\}\),
+where the \(K\) answer actions are the top-ranked Stage 5 spans and
+\(\varnothing\) is the explicit abstain action.
+This is important architecturally:
+the heavy transformer encoder is reused as a proposal network, while the new
+learning problem is pushed into a much smaller action-selection model.
+
+\paragraph{Candidate features.}
+Each candidate \(a_k\) is converted into a compact feature vector
+\(x_k \in \mathbb{R}^{12}\).
+The current implementation uses Stage 5 span score, gap to the best span,
+margin to the next span, keep probability, calibrated Stage 4 support
+probability, Stage 5 abstain probability, optional Stage 6 controller
+probability, answer length, normalized rank, question-answer lexical overlap,
+keep-versus-support disagreement, and a keep-uncertainty term.
+In other words, Stage 8.2 does not ask the final controller to rediscover span
+semantics from scratch.
+It receives an already-structured candidate description containing both answer
+quality and groundedness cues.
+
+\paragraph{Two-head candidate encoder plus abstain head.}
+The final controller is a shallow MLP rather than another large transformer.
+For each candidate feature vector \(x_k\), the model computes
+\begin{align}
+  h_k &= \mathrm{MLP}(x_k), \\
+  u_k &= w_u^\top h_k + b_u, \\
+  r_k &= \sigma(w_r^\top h_k + b_r),
+\end{align}
+where \(u_k\) is a utility logit for answering with candidate \(a_k\) and
+\(r_k\) is a risk probability for that answer being unsupported.
+The candidate encoder is a two-layer GELU MLP with dropout.
+To model abstention as a first-class action, the network also pools the
+candidate hidden states with mean and max pooling and sends the concatenated
+summary through a separate abstain head:
+\begin{equation}
+  u_{\varnothing}
+  =
+  f_{\mathrm{abs}}\!\left(
+    \left[
+      \mathrm{mean}(h_1,\dots,h_K);
+      \mathrm{max}(h_1,\dots,h_K)
+    \right]
+  \right).
+\end{equation}
+So the final decision layer is explicitly group-aware:
+abstention depends on the whole candidate set, not just on the top span.
+
+\paragraph{Risk-adjusted action selection.}
+Stage 8.2 keeps the Stage 7 decision logic but improves the support features
+feeding it.
+Each candidate action is scored by subtracting a dual-weighted risk penalty
+from its utility logit:
+\begin{equation}
+  s_k = u_k - \lambda_{\mathrm{u}} r_k.
+\end{equation}
+The abstain action gets its own logit
+\(s_{\varnothing} = u_{\varnothing} - \lambda_{\mathrm{a}}\),
+where \(\lambda_{\mathrm{a}}\) is the over-abstention dual.
+The final action distribution is then
+\begin{equation}
+  \pi(a \mid q,p)
+  =
+  \mathrm{softmax}([s_1,\dots,s_K,s_{\varnothing}]).
+\end{equation}
+At inference time the system first keeps only candidates whose predicted risk
+falls below the selected threshold \(\rho\).
+If calibrated Stage 4 support is available, it also applies a hard support
+shield so that candidates below the calibrated support floor are removed before
+the final answer-or-\abstain\ choice.
+
+\paragraph{Why this is the final chosen learned model.}
+Stage 8.2 is the paper's final learned architecture because it cleanly
+combines the three most useful ingredients discovered earlier:
+\begin{enumerate}[leftmargin=1.25em]
+  \item Stage 5 provides a strong frozen answer proposal space,
+  \item Stage 4 provides calibrated support as a groundedness feature rather
+  than only as a post-hoc gate, and
+  \item Stage 7 provides an explicit action-space learner with separate
+  utility, risk, and abstain components.
+\end{enumerate}
+This makes Stage 8.2 the most faithful end-to-end test of the paper's deep
+learning hypothesis:
+that grounded QA should be modeled as learned action selection over candidate
+answers under calibrated evidence support and explicit safety budgets.
+It is \emph{not} claimed as the strongest overall operating point in the final
+results.
+That distinction remains important:
+Stage 4 is still the best executed overall trade-off, while Stage 8.2 is the
+cleanest final learned architecture.
+Figure~\ref{fig:stage8-2-architecture} summarizes that flow in the same
+candidate-to-action order used by the implementation.
+
+\begin{figure*}[t]
+  \centering
+  \resizebox{0.98\textwidth}{!}{\input{figures/stage8-2-architecture-tikz.tex}}
+  \caption{Compact left-to-right Mermaid-like LaTeX flowchart of the final chosen learned
+  architecture, Stage 8.2.
+  The Stage 5 DistilBERT checkpoint is frozen and used only to generate the
+  top-\(K\) answer candidates.
+  Stage 4 contributes calibrated support as both a candidate feature and an
+  optional hard support shield.
+  A shallow Stage 8.2 action network then predicts utility, risk, and abstain
+  scores before making the final answer-or-\abstain\ decision.}
+  \label{fig:stage8-2-architecture}
+\end{figure*}
+
+\subsection{Experimental design for the remaining comparison}
+
+Under this revised formulation, the next comparison should be deliberately
+simple and controlled.
+The same backbone, dataset split, preprocessing, and core QA setup should be
+kept fixed, while only the decision formulation changes.
+The intended comparison is therefore:
+\begin{enumerate}[leftmargin=1.25em]
+  \item the current modular pipeline
+  (Stage 1 abstention, Stage 2 support verification, and Stage 3 calibration),
+  \item a fixed constrained controller over the calibrated signals, and
+  \item a direct support-constrained learner with the same encoder family and
+  preprocessing pipeline, trained under matched conditions,
+  \item a Stage 6 answer-conditioned adaptive learner, and
+  \item a Stage 7 risk-budgeted action learner with explicit abstain choice
+  and explicit unsupported-answer and over-abstention budgets,
+  \item a Stage 8 Hybrid controller that restores calibrated control on top of
+  the Stage 5 answer engine, and
+  \item a Stage 8.2 action learner that injects calibrated Stage 4 support
+  back into the Stage 7 action formulation under a clean final split.
+\end{enumerate}
+This comparison design is important because it isolates the real question:
+whether the main remaining gain comes from further module tuning, or from
+changing the learning objective itself.
+The direct-learning side of this comparison is now already executed through
+Stage 7, and the modular Stage 4 controller baseline is also now executed under
+matched conditions.
+Its near-null development result makes the comparison more concrete rather than
+less:
+the paper no longer needs to speculate about whether calibrated fixed control
+would help in principle, because the first such controller is now available as
+an empirical reference point.
+
+\subsection{Stage 3 confidence calibration}
+
+Stage 3 does not retrain the Stage 1 QA model or the Stage 2 verifier.
+Instead, it treats both of them as fixed score generators and asks whether
+their confidence values can be made more trustworthy through lightweight
+post-hoc calibration.
+The goal is not yet to change the final controller.
+The goal is to produce calibrated decision signals that later stages can trust
+when deciding whether to answer, abstain, or suppress a weakly supported
+answer.
+
+\paragraph{QA decision calibration.}
+For the Stage 1 abstain-aware model, Stage 3 reuses the same
+validation-selected abstention threshold \(\tau\) and constructs a scalar QA
+decision score from the margin between the null score and the best answer-span
+score.
+If the QA system predicts \abstain, the score is defined as
+\begin{equation}
+  z_{\mathrm{qa}}
+  =
+  \Delta - \tau,
+\end{equation}
+and if it predicts an answer, the sign is flipped so that larger values always
+mean \emph{more confidence that the final QA decision was correct}:
+\begin{equation}
+  z_{\mathrm{qa}}
+  =
+  \tau - \Delta.
+\end{equation}
+The binary QA calibration label is 1 if the final Stage 1 decision was correct
+under the decision-aware evaluation rule and 0 otherwise.
+
+\paragraph{Support-score calibration.}
+For Stage 2, only QA predictions that remain \texttt{answer} are passed to the
+support verifier, just as in the original Stage 2 pipeline.
+The verifier produces a support probability
+\(
+  p_{\mathrm{sup}} = P_{\phi}(\text{supported} \mid q,p,a)
+\).
+Stage 3 first maps that probability back to a logit-like score through the
+inverse sigmoid:
+\begin{equation}
+  z_{\mathrm{sup}}
+  =
+  \log\frac{p_{\mathrm{sup}}}{1 - p_{\mathrm{sup}}},
+\end{equation}
+and then calibrates this score against a binary target indicating whether the
+predicted answer actually matches a gold answer strongly enough to count as
+supported.
+
+\paragraph{Temperature scaling.}
+Both score streams are calibrated separately with scalar temperature scaling.
+Given a raw score \(z\) and a learned temperature \(T > 0\), the calibrated
+probability is
+\begin{equation}
+  \tilde{p}
+  =
+  \sigma\!\left(\frac{z}{T}\right),
+\end{equation}
+where \(\sigma(\cdot)\) is the sigmoid function.
+The implementation searches over a bounded grid of temperatures on the
+validation split and picks the value that minimizes the Brier score, with
+expected calibration error (ECE) used as the tie-breaker.
+This is a deliberately simple post-hoc mechanism:
+the underlying QA and verifier parameters stay fixed, and only the sharpness of
+their confidence mapping changes.
+
+\paragraph{Stage 3 metrics and artifacts.}
+Stage 3 reports raw-versus-calibrated metrics for both QA and support scores on
+the held-out development split.
+The main reported quantities are ECE, adaptive ECE, maximum calibration error
+(MCE), Brier score, a threshold-gap measure, score-label correlation, and
+reliability diagrams.
+Because the same Stage 1 QA threshold and Stage 2 support threshold are kept
+fixed, Stage 3 should be read as a calibration study rather than as a new
+end-to-end controller.
+Its success criterion is narrower:
+reduce overconfidence and make the score distributions more faithful to
+empirical correctness so that later control stages have a better starting
+signal.
 In deep learning terms, Stage 2 tests whether a second learned representation
 space over \((q, p, a)\) can act as a useful post-hoc controller on top of the
 Stage 1 answer space.
