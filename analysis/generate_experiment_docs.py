@@ -236,9 +236,17 @@ def maybe_metric_dict(data: dict[str, Any], *keys: str) -> dict[str, Any] | None
     return None
 
 
-def maybe_answer_rate_from_predictions(data: dict[str, Any]) -> float | None:
-    predictions = data.get("dev_predictions")
-    if not isinstance(predictions, dict) or not predictions:
+def maybe_answer_rate_from_predictions(data: dict[str, Any], *keys: str) -> float | None:
+    if not keys:
+        keys = ("dev_predictions",)
+
+    predictions = None
+    for key in keys:
+        candidate = data.get(key)
+        if isinstance(candidate, dict) and candidate:
+            predictions = candidate
+            break
+    if predictions is None:
         return None
     answered = 0
     for value in predictions.values():
@@ -267,13 +275,30 @@ def float_or_none(value: Any) -> float | None:
 
 
 def extract_metric_row(label: str, family: str, source_path: Path, data: dict[str, Any]) -> dict[str, Any] | None:
-    metrics = maybe_metric_dict(data, "dev_metrics", "control_dev_metrics", "gated_dev_metrics")
-    if metrics is None:
-        return None
+    split_name = "dev"
+    metrics = maybe_metric_dict(data, "final_metrics")
+    mix = maybe_metric_dict(data, "final_mix")
+    overabstain = maybe_metric_dict(data, "final_overabstain")
+    prediction_keys = ("final_predictions",)
 
-    mix = maybe_metric_dict(data, "dev_mix", "control_dev_mix")
-    overabstain = maybe_metric_dict(data, "dev_overabstain")
-    answer_rate = float_or_none(mix.get("answer_rate")) if mix else maybe_answer_rate_from_predictions(data)
+    if metrics is not None:
+        split_name = str(data.get("final_eval_split") or "final")
+    else:
+        metrics = maybe_metric_dict(data, "test_metrics")
+        mix = maybe_metric_dict(data, "test_mix")
+        overabstain = maybe_metric_dict(data, "test_overabstain")
+        prediction_keys = ("test_predictions",)
+        if metrics is not None:
+            split_name = "test"
+        else:
+            metrics = maybe_metric_dict(data, "dev_metrics", "control_dev_metrics", "gated_dev_metrics")
+            mix = maybe_metric_dict(data, "dev_mix", "control_dev_mix")
+            overabstain = maybe_metric_dict(data, "dev_overabstain")
+            prediction_keys = ("dev_predictions",)
+            if metrics is None:
+                return None
+
+    answer_rate = float_or_none(mix.get("answer_rate")) if mix else maybe_answer_rate_from_predictions(data, *prediction_keys)
     supported_answer_rate = float_or_none(mix.get("supported_answer_rate")) if mix else None
     unsupported_among_answers_rate = float_or_none(mix.get("unsupported_among_answers_rate")) if mix else None
 
@@ -281,6 +306,7 @@ def extract_metric_row(label: str, family: str, source_path: Path, data: dict[st
         "label": label,
         "family": family,
         "source_path": str(source_path),
+        "reported_split": split_name,
         "overall_f1": float_or_none(metrics.get("overall_f1")),
         "answerable_f1": float_or_none(metrics.get("answerable_f1")),
         "unsupported_answer_rate": float_or_none(metrics.get("unsupported_answer_rate")),
@@ -452,6 +478,9 @@ def generate_status_board(
     stage8_completion_marker_missing = bool(
         stage8_run and stage8_run["status"] == "complete" and not (stage8_run["path"] / "RUN_COMPLETED.txt").exists()
     )
+    stage8_2_run = canonical_runs.get("stage8_2")
+    stage8_2_row = next((row for row in rows if row["family"] == "stage8_2"), None)
+    stage8_2_complete = bool(stage8_2_run and stage8_2_run["status"] == "complete" and stage8_2_row is not None)
 
     lines: list[str] = []
     lines.append("# KeelNet Current Experiment Status")
@@ -482,18 +511,24 @@ def generate_status_board(
         )
         if stage8_completion_marker_missing:
             lines.append("- `Stage 8 Hybrid` still does not have `RUN_COMPLETED.txt` or `collab-share-note.md` saved.")
-    else:
+    elif not stage8_2_complete:
         lines.append("- `Stage 8 Hybrid` is only partially saved right now, and `Stage 8.2` has no saved run yet.")
+    if stage8_2_complete and stage8_2_row is not None:
+        lines.append(
+            f"- `Stage 8.2` now has a clean-split saved run on `{stage8_2_row['reported_split']}`: "
+            f"`overall_f1 = {fmt(stage8_2_row['overall_f1'])}` and "
+            f"`unsupported_answer_rate = {fmt(stage8_2_row['unsupported_answer_rate'])}`."
+        )
     lines.append("")
     lines.append("## Current Frontier")
     lines.append("")
-    lines.append("| Label | Overall F1 | Answerable F1 | Unsupported answer rate | Abstain F1 |")
-    lines.append("| --- | ---: | ---: | ---: | ---: |")
+    lines.append("| Label | Split | Overall F1 | Answerable F1 | Unsupported answer rate | Abstain F1 |")
+    lines.append("| --- | --- | ---: | ---: | ---: | ---: |")
     for family in ("stage1", "stage4", "stage5", "stage6", "stage7", "stage8", "stage8_2"):
         for row in rows:
             if row["family"] == family:
                 lines.append(
-                    f"| {row['label']} | {fmt(row['overall_f1'])} | {fmt(row['answerable_f1'])} | "
+                    f"| {row['label']} | {row['reported_split']} | {fmt(row['overall_f1'])} | {fmt(row['answerable_f1'])} | "
                     f"{fmt(row['unsupported_answer_rate'])} | {fmt(row['abstain_f1'])} |"
                 )
     lines.append("")
@@ -565,6 +600,9 @@ def generate_full_audit(
     stage8_completion_marker_missing = bool(
         stage8_run and stage8_run["status"] == "complete" and not (stage8_run["path"] / "RUN_COMPLETED.txt").exists()
     )
+    stage8_2_run = canonical_runs.get("stage8_2")
+    stage8_2_row = next((row for row in rows if row["family"] == "stage8_2"), None)
+    stage8_2_complete = bool(stage8_2_run and stage8_2_run["status"] == "complete" and stage8_2_row is not None)
 
     lines: list[str] = []
     lines.append("# KeelNet Current Experiment Audit")
@@ -572,6 +610,7 @@ def generate_full_audit(
     lines.append(f"Generated: {generated_on}")
     lines.append("")
     lines.append("This file is generated by `analysis/generate_experiment_docs.py`.")
+    lines.append("It is the canonical merged experiment doc and replaces the older standalone status board and dated snapshot.")
     lines.append("")
     lines.append("## Scope")
     lines.append("")
@@ -609,8 +648,15 @@ def generate_full_audit(
         )
         if stage8_completion_marker_missing:
             lines.append("- `Stage 8 Hybrid` still lacks notebook completion bookkeeping: `RUN_COMPLETED.txt` and `collab-share-note.md` are missing.")
-    else:
+    elif not stage8_2_complete:
         lines.append("- `Stage 8 Hybrid` is incomplete on disk, and `Stage 8.2` has not been saved yet.")
+    if stage8_2_complete and stage8_2_row is not None:
+        lines.append(
+            f"- `Stage 8.2` now has a clean-split `{stage8_2_row['reported_split']}` result on disk: "
+            f"`overall_f1 = {fmt(stage8_2_row['overall_f1'])}`, "
+            f"`answerable_f1 = {fmt(stage8_2_row['answerable_f1'])}`, "
+            f"`unsupported_answer_rate = {fmt(stage8_2_row['unsupported_answer_rate'])}`."
+        )
     lines.append("")
     lines.append("## Canonical Artifact Inventory")
     lines.append("")
@@ -628,11 +674,11 @@ def generate_full_audit(
     lines.append("")
     lines.append("## Headline Comparison Metrics")
     lines.append("")
-    lines.append("| Label | Overall F1 | Answerable F1 | Unsupported answer rate | Abstain F1 | Answer rate |")
-    lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
+    lines.append("| Label | Split | Overall F1 | Answerable F1 | Unsupported answer rate | Abstain F1 | Answer rate |")
+    lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: |")
     for row in rows:
         lines.append(
-            f"| {row['label']} | {fmt(row['overall_f1'])} | {fmt(row['answerable_f1'])} | "
+            f"| {row['label']} | {row['reported_split']} | {fmt(row['overall_f1'])} | {fmt(row['answerable_f1'])} | "
             f"{fmt(row['unsupported_answer_rate'])} | {fmt(row['abstain_f1'])} | {fmt(row['answer_rate'])} |"
         )
     lines.append("")
@@ -724,12 +770,12 @@ def generate_full_audit(
             row = next((item for item in rows if item["family"] == stage_key), None)
             if row is not None:
                 lines.append(
-                    f"- Dev: `overall_f1 = {fmt(row['overall_f1'])}`, "
+                    f"- {str(row.get('reported_split', 'dev')).title()}: `overall_f1 = {fmt(row['overall_f1'])}`, "
                     f"`answerable_f1 = {fmt(row['answerable_f1'])}`, "
                     f"`unsupported_answer_rate = {fmt(row['unsupported_answer_rate'])}`."
                 )
                 if row.get("overabstain_rate") is not None:
-                    lines.append(f"- Dev over-abstain rate: `{fmt(row['overabstain_rate'])}`.")
+                    lines.append(f"- {str(row.get('reported_split', 'dev')).title()} over-abstain rate: `{fmt(row['overabstain_rate'])}`.")
 
         if stage_key == "stage4":
             path = run["path"] / "control_eval.json"
@@ -746,7 +792,15 @@ def generate_full_audit(
             else:
                 lines.append("- This run should not be treated as a comparable result until `hybrid_eval.json` and `RUN_COMPLETED.txt` both exist.")
         if stage_key == "stage8_2":
-            lines.append("- The Stage 8.2 notebook exists in the repo, but no saved `stage8_2_colab` run was found.")
+            path = run["path"] / "hybrid_eval.json"
+            if path.exists():
+                data = load_json(path)
+                risk_threshold = data.get("selected_risk_threshold")
+                final_split = data.get("final_eval_split")
+                if risk_threshold is not None:
+                    lines.append(f"- Selected risk threshold: `{fmt(risk_threshold)}`.")
+                if final_split is not None:
+                    lines.append(f"- Final reported split: `{final_split}`.")
         lines.append("")
 
     lines.append("## Local Runtime Vs Drive Storage")
@@ -804,12 +858,17 @@ def parse_args() -> argparse.Namespace:
     repo_root = script_path.parent.parent
     docs_dir = repo_root / "docs"
 
-    parser = argparse.ArgumentParser(description="Generate KeelNet experiment status markdown docs.")
+    parser = argparse.ArgumentParser(description="Generate KeelNet experiment markdown docs.")
     parser.add_argument("--repo-root", type=Path, default=repo_root)
     parser.add_argument("--local-artifacts-root", type=Path, default=Path("/content/KeelNet-local/artifacts"))
     parser.add_argument("--drive-artifacts-root", type=Path, default=Path("/mnt/g/My Drive/KeelNet/artifacts"))
-    parser.add_argument("--board-output", type=Path, default=docs_dir / "current-experiment-status.md")
     parser.add_argument("--audit-output", type=Path, default=docs_dir / "current-experiment-audit.md")
+    parser.add_argument(
+        "--board-output",
+        type=Path,
+        default=None,
+        help="Optional legacy status-board output path. Omitted by default because the audit is now the canonical merged doc.",
+    )
     return parser.parse_args()
 
 
@@ -841,18 +900,6 @@ def main() -> None:
     incomplete_runs.sort(key=lambda item: (storage_priority(item["storage"]), str(item["path"])))
 
     generated_on = date.today().isoformat()
-    audit_reference = (
-        f"[{args.audit_output.name}](./{args.audit_output.name})"
-        if args.audit_output.parent.resolve() == args.board_output.parent.resolve()
-        else f"`{args.audit_output.resolve()}`"
-    )
-    status_text = generate_status_board(
-        generated_on,
-        canonical_runs,
-        rows,
-        incomplete_runs,
-        audit_reference,
-    )
     audit_text = generate_full_audit(
         generated_on,
         repo_root,
@@ -862,12 +909,25 @@ def main() -> None:
         incomplete_runs,
     )
 
-    args.board_output.parent.mkdir(parents=True, exist_ok=True)
     args.audit_output.parent.mkdir(parents=True, exist_ok=True)
-    args.board_output.write_text(status_text, encoding="utf-8")
     args.audit_output.write_text(audit_text, encoding="utf-8")
 
-    print(f"Wrote status board: {args.board_output}")
+    if args.board_output is not None:
+        audit_reference = (
+            f"[{args.audit_output.name}](./{args.audit_output.name})"
+            if args.audit_output.parent.resolve() == args.board_output.parent.resolve()
+            else f"`{args.audit_output.resolve()}`"
+        )
+        status_text = generate_status_board(
+            generated_on,
+            canonical_runs,
+            rows,
+            incomplete_runs,
+            audit_reference,
+        )
+        args.board_output.parent.mkdir(parents=True, exist_ok=True)
+        args.board_output.write_text(status_text, encoding="utf-8")
+        print(f"Wrote legacy status board: {args.board_output}")
     print(f"Wrote audit: {args.audit_output}")
 
 
