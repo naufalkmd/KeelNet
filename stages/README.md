@@ -24,6 +24,7 @@ Stages:
 6. `06-adaptive-constraint-balancing`
 7. `07-risk-budgeted-action-learning`
 8. `08-joint-optimization`
+9. `09-risk-generalization`
 
 Interpretation:
 
@@ -33,6 +34,7 @@ Interpretation:
 - Stage `06` is the optional adaptive extension after the strongest fixed or constrained baseline is already clear.
 - Stage `07` is the explicit utility-versus-risk action-learning extension if Stage `06` still behaves like a weak conservatizing wrapper.
 - Stage `08` is the hybrid wrap-up stage that keeps Stage `05` as the answer engine and adds calibrated control back on top.
+- Stage `09` is the hardening pass for that hybrid path when the learned decision layer still misses held-out risk control and needs better transfer instead of a brand-new architecture.
 
 Current execution priority:
 
@@ -42,6 +44,7 @@ Current execution priority:
 - `06-adaptive-constraint-balancing` only if Stage 5 still leaves meaningful headroom
 - `07-risk-budgeted-action-learning` only if Stage 6 still needs a stronger decision formulation
 - `08-joint-optimization` only if the final answer is likely to be a hybrid instead of a pure modular or pure direct-learning system
+- `09-risk-generalization` only if Stage 8.2 still looks promising but the learned risk signal does not transfer tightly enough on held-out data
 - retrieval realism later, after the core Stage 4 versus Stage 5 comparison is stable
 
 Current implementation status:
@@ -49,6 +52,7 @@ Current implementation status:
 - Stage `01` has the completed supporting implementation and reference results
 - Stage `02` now has the supporting implementation plus a completed reference run, which shows a learnable verifier signal but only a modest end-to-end gain
 - Stages `03` to `08` now have teammate notebooks and runnable stage-specific Python paths in the repo
+- Stage `09` now has a teammate notebook scaffold that reuses the current `keelnet.action` path while Stage 9-specific model changes are still landing
 
 Current findings snapshot:
 
@@ -67,6 +71,7 @@ Examples:
 - `notebooks/stage-02-5-hard-negative-support-verification-colab.ipynb`
 - `notebooks/stage-05-support-constrained-learning-colab.ipynb`
 - `notebooks/stage-08-2-action-learner-calibrated-support-colab.ipynb`
+- `notebooks/stage-09-risk-generalization-colab.ipynb`
 
 Use the stage-specific `stage-XX-...-colab.ipynb` files as the canonical
 notebook names for each stage.
@@ -99,6 +104,7 @@ Recommended shared branches:
 - `stage/06-adaptive-constraint-balancing`
 - `stage/07-risk-budgeted-action-learning`
 - `stage/08-joint-optimization`
+- `stage/09-risk-generalization`
 
 Suggested workflow:
 
