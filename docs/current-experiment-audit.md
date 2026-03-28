@@ -182,6 +182,29 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Optional Stage 6 balancer: `/mnt/g/My Drive/KeelNet/artifacts/stage6_colab/naufal-stage6-v1/balancer`
 - Stage 7 eval: `/mnt/g/My Drive/KeelNet/artifacts/stage7_colab/naufal-stage7-v1/risk_action_eval.json`
 
+## Experiment Checklist
+
+### Must-Have Before Strong Final Claims
+
+- Run a same-split final comparison for `Stage 4`, `Stage 7`, and `Stage 8.2` under clean splitting so the strongest checkpoints are compared on the same final split.
+- Add simple external baselines to the final comparison, especially raw QA confidence thresholding and calibrated QA confidence thresholding.
+- Run at least three seeds for `Stage 4`, `Stage 7`, and `Stage 8.2`, then report mean and standard deviation for overall `F_1`, answerable `F_1`, unsupported-answer rate, and abstain `F_1`.
+- Run Stage 8.2 ablations to isolate what matters: frozen Stage 5 only, `+` calibrated Stage 4 support, `+/-` hard support shield, and optional `+/-` Stage 6 prior.
+
+### Most Valuable Next
+
+- Build one validation-to-final gap table for `Stage 4`, `Stage 7`, and `Stage 8.2`, including selected threshold, validation unsupported-answer rate, final unsupported-answer rate, validation overall `F_1`, and final overall `F_1`.
+- Add one qualitative error slice covering false supported answers, over-abstentions, `Stage 4` correct versus `Stage 8.2` wrong cases, and examples where `Stage 8.2` improves answerability but loses groundedness.
+- If time allows, rerun `Stage 5` on the same clean final split so the modular-versus-learned regime claim is fully apples-to-apples.
+
+### Best Execution Order
+
+- `1.` Clean-split rerun of `Stage 4` in `stages/04-unsupported-confidence-control/notebooks/stage-04-unsupported-confidence-control-colab.ipynb`.
+- `2.` Clean-split rerun of `Stage 7` in `stages/07-risk-budgeted-action-learning/notebooks/stage-07-risk-budgeted-action-learning-colab.ipynb`.
+- `3.` Multi-seed reruns of `Stage 8.2` in `stages/08-joint-optimization/notebooks/stage-08-2-action-learner-calibrated-support-colab.ipynb`.
+- `4.` Add threshold baselines and the new same-split rows to `analysis/notebooks/final-comparison-colab.ipynb`.
+- `5.` Run `Stage 8.2` ablations only after the clean comparison table is stable.
+
 ## Repo State Notes
 
 - Repo root: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet`
