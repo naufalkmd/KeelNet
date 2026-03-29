@@ -6,6 +6,13 @@ from validation to held-out data.
 
 This is not a new search-heavy architecture.
 It is a harder, more stable version of the current learned action layer.
+The exact implementation target now lives in `keelnet.stage9`, which isolates
+the Stage 9 logic from the old Stage 7 and Stage 8 action-learning code and
+now trains its own proposal model and support scorer inside Stage 9 before
+freezing them for the decision layer.
+External Stage 5 model directories and Stage 4 control artifacts are no
+longer runtime requirements for Stage 9; they are optional comparison anchors
+only.
 
 ## Goal
 
@@ -16,9 +23,9 @@ utility.
 
 ## What Stays Fixed
 
-- base QA model as the proposal network
+- internally trained proposal model as the frozen proposal network
 - top-K candidate generation
-- support or evidence scorer
+- internally trained support scorer
 - learned utility head
 - learned risk head
 - explicit abstain action
@@ -41,35 +48,53 @@ utility.
 
 ## Architecture
 
-### DeepSeek-Safe Version
+### SOta Version
 
 ```mermaid
 flowchart TD
-    QD[Question + Evidence + Domain] --> ENC[Unified Encoder]
-    ENC --> K[Adaptive Top-K Generator]
-    K --> FE1[Per-Candidate Feature Builder]
-    FE1 --> FE2[Cross-Candidate Aggregator]
-    FE2 --> JH[Joint Decision Head]
+    %% Upstream (Frozen for control)
+    Q[Question + Evidence Passage] --> B[Frozen: Base QA Model]
+    B --> K[Modular: Top-K Candidate Generator]
+    Q --> S[Frozen: Support / Evidence Scorer]
+    K --> F[Modular: Candidate + Uncertainty Feature Builder]
+    S --> SC[Post-hoc: Support Calibration]
+    SC --> F
 
-    UF[[Uncertainty and Disagreement Signals]] --> FE1
-    DF[[Domain Shift Signal]] --> FE1
+    %% Feature & Decision Layer
+    F --> U([Utility Head])
+    F --> R([Risk Head])
+    F --> A([Abstain Head])
+    F --> H([Hedging/Confidence Head]) %% NEW: For graded responses
+    UF[[Uncertainty + Disagreement Signals]] --> F
+    CI[[Candidate-Set Interaction Signals]] --> A
 
-    JH --> CL[Shared Calibration Layer]
-    CL --> DP[Decision Policy Network]
-    DP --> Y[Final Output: Answer or Abstain]
+    %% Training & Supervision
+    HN[[Hard Negatives + Borderline Unsupported Cases]] --> RT[[Tail-Risk Training]]
+    RS[[Randomization Support]] --> RT
+    RT -. tail-risk supervision .-> R
+    UU[[Utility Supervision]] -. auxiliary .-> U
+    RU[[Risk Supervision]] -. auxiliary .-> R
+    AU[[Abstain Supervision]] -. auxiliary .-> A
+    HU[[Hedging Supervision]] -. auxiliary .-> H %% NEW: For hedged/partial answers
 
-    subgraph TRAIN[Training Objectives]
-        TS1[[Utility and Accuracy Loss]]
-        TS2[[Risk and Abstention Loss]]
-        TS3[[Joint Expected Utility Objective]]
-    end
+    D[[Optional Domain Signal or Domain Features]] --> R
 
-    TS1 -.-> JH
-    TS2 -.-> JH
-    TS3 -.-> DP
+    %% Calibration & Scoring
+    R --> RC[Post-hoc: Risk Calibration]
+    U --> G([Risk-Adjusted Action Scoring])
+    A --> G
+    H --> G %% NEW: Hedging/Confidence influences scoring
+    RC --> G
+    SC --> SH[Post-hoc: Hard Support Shield]
+    K --> SH
+    SH --> G
+    JD[[Joint Decision Loss]] -. joint supervision .-> G
 
-    Y --> EX[Explanation Generator]
-    EX --> LOG[Monitoring and Logging]
+    %% Final Decision
+    G --> AB{Post-hoc: Graded Abstain Boundary}
+    AB -->|Confident| Y1[Final Output: Confident Answer]
+    AB -->|Hedged| Y2[Final Output: Hedged/Partial Answer]
+    AB -->|Abstain| Y3[Final Output: ABSTAIN]
 ```
 
 ### Legend
@@ -162,12 +187,13 @@ main deployed decision path.
 
 - `Question + Evidence Passage`: the input question and the provided evidence
   context.
-- `Frozen: Base QA Model`: the upstream QA backbone reused as a fixed proposal
-  model rather than retrained inside Stage 9.
+- `Frozen: Base QA Model`: the QA proposal model trained inside Stage 9, then
+  frozen for candidate generation while the decision layer is learned on top.
 - `Modular: Top-K Candidate Generator`: turns the QA outputs into a bounded set
   of candidate answers.
-- `Frozen: Support / Evidence Scorer`: estimates how well each candidate is
-  supported by the evidence.
+- `Frozen: Support / Evidence Scorer`: the support model trained inside Stage 9
+  and then frozen so the downstream action layer receives a stable evidence
+  signal.
 - `Modular: Candidate + Uncertainty Feature Builder`: assembles the
   candidate-level signals used by the action learner, including uncertainty,
   disagreement, and margin-style features.
@@ -427,6 +453,60 @@ keeping the learned action layer central.
   losing safety
 - gains are not explained only by a lower answer rate
 
+## Observed Result: `naufal-stage9-v1`
+
+The first saved Stage 9 run used:
+
+This result came from the earlier Stage 9 approximation path before the new
+isolated `keelnet.stage9` implementation landed, so treat it as the old
+baseline for the exact architecture rather than as the final word on Stage 9.
+
+- Stage 9 eval: `G:\My Drive\KeelNet\artifacts\stage9_colab\naufal-stage9-v1\stage9_eval.json`
+- Stage 8.2 baseline: `G:\My Drive\KeelNet\artifacts\stage8_2_colab\naufal-stage8-2-v1\hybrid_eval.json`
+- Stage 4 anchor: `G:\My Drive\KeelNet\artifacts\stage4_colab\naufal-stage4-v1\control_eval.json`
+
+Held-out comparison:
+
+| System         | Overall `F1` | Answerable `F1` | Unsupported-answer rate | Answer rate | Supported-answer rate | Over-abstain rate |
+| -------------- | -------------: | ----------------: | ----------------------: | ----------: | --------------------: | ----------------: |
+| Stage 9        |      `68.15` |         `68.00` |              `31.69%` |  `54.63%` |            `64.12%` |        `22.37%` |
+| Stage 8.2      |      `68.16` |         `70.06` |              `33.73%` |  `56.72%` |            `63.28%` |        `20.23%` |
+| Stage 4 anchor |      `69.41` |         `66.41` |              `27.59%` |  `50.68%` |            `66.61%` |               n/a |
+
+What this means:
+
+- Stage 9 did improve held-out unsupported-answer rate versus Stage 8.2:
+  `31.69%` versus `33.73%`, a gain of about `2.04` points.
+- That gain came with lower answerable quality and a more conservative answer
+  policy:
+  answerable `F1` fell from `70.06` to `68.00`, answer rate fell from `56.72%`
+  to `54.63%`, and over-abstain rate rose from `20.23%` to `22.37%`.
+- Overall `F1` stayed effectively flat versus Stage 8.2:
+  `68.15` versus `68.16`.
+- Stage 9 still does not beat the Stage 4 modular anchor on held-out safety or
+  overall quality:
+  Stage 4 remains safer at `27.59%` unsupported-answer rate and stronger on
+  overall `F1` at `69.41`.
+- Stage 9 does still preserve one part of the hoped-for learned-path story:
+  it remains above Stage 4 on answerable `F1`
+  (`68.00` versus `66.41`).
+
+Validation-to-held-out transfer is still the main problem:
+
+- Stage 9 validation unsupported-answer rate was `17.29%`, but final
+  unsupported-answer rate rose to `31.69%`.
+- Stage 8.2 showed almost the same transfer failure:
+  `19.31%` on validation versus `33.73%` on final.
+- So Stage 9 helped the final operating point a little, but it did not yet
+  solve the central Stage 9 question of strong risk generalization.
+
+Current verdict:
+
+- `weak success` as a Stage 8.2 hardening pass
+- not yet a convincing Stage 9 breakthrough
+- still supports the Stage 9 diagnosis that the next bottleneck is held-out
+  risk transfer, not lack of architectural components
+
 ## Out Of Scope
 
 - AlphaZero-style tree search
@@ -457,7 +537,8 @@ What we agree with:
 
 What we do not accept as the default Stage 9 move:
 
-- fully unfreezing the upstream QA and support stack
+- fully unfreezing the internally trained QA and support stack during the
+  decision-layer phase
 - removing post-hoc safeguards before the learned risk signal earns that trust
 - replacing the current candidate-action formulation with a new large design
 
@@ -465,7 +546,8 @@ Why:
 
 - the controlled Stage 9 question is whether the learned decision layer can
   improve risk generalization under the existing proposal space
-- freezing the upstream stack keeps the comparison interpretable
+- freezing the internally trained proposal and support stack keeps the
+  comparison interpretable
 - post-hoc safeguards are currently compensating for a real held-out weakness,
   not just architectural untidiness
 

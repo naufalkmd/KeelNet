@@ -4014,7 +4014,7 @@ def stage9_config_code() -> str:
             COMPLETION_MARKER_NAME = "RUN_COMPLETED.txt"
 
             STAGE_TITLE = "Stage 9: Risk Generalization And Tail-Risk Control"
-            STAGE_OBJECTIVE = "Keep the current Stage 9 target logic in the Stage 8.2 action path: frozen Stage 5 QA proposals, calibrated Stage 4 support, candidate plus uncertainty features, utility plus risk plus abstain heads, post-hoc risk calibration, a hard support shield, and a safer abstain boundary tuned for better held-out risk transfer."
+            STAGE_OBJECTIVE = "Run the exact isolated Stage 9 architecture as a self-contained pipeline: train the proposal model and support scorer inside Stage 9 itself, then learn the risk-aware decision layer on top."
             TARGET_METRICS = [
                 "overall F1",
                 "answerable F1",
@@ -4025,11 +4025,11 @@ def stage9_config_code() -> str:
                 "comparison against Stage 8.2 and the Stage 4 anchor",
             ]
             IMPLEMENTATION_HINTS = [
-                "inference path: frozen Stage 5 proposals -> calibrated Stage 4 support -> candidate plus uncertainty features -> utility, risk, and abstain heads -> post-hoc risk calibration -> hard support shield -> answer or abstain",
-                "training path: auxiliary head supervision, candidate-set interaction cues for abstention, optional domain features for risk, plus stronger tail-risk pressure with the final decision quality as the real target",
+                "inference path: Stage 9 trained proposal model -> Stage 9 trained support scorer -> candidate plus uncertainty features -> utility, risk, and abstain heads -> post-hoc risk calibration -> hard support shield -> better abstain boundary -> answer or abstain",
+                "training path: train proposal and support modules inside Stage 9, then optimize joint decision loss plus utility, risk, and abstain supervision with stronger tail-risk pressure",
                 "success means a smaller held-out safety gap than Stage 8.2 without collapsing answerable utility toward the Stage 4 anchor",
             ]
-            SUGGESTED_MODULES = ["keelnet.action", "keelnet.control", "keelnet.learn", "keelnet.verify", "keelnet.metrics"]
+            SUGGESTED_MODULES = ["keelnet.stage9"]
 
 
             def completed_versions(root: Path, run_basename: str) -> list[int]:
@@ -4094,16 +4094,6 @@ def stage9_config_code() -> str:
 
             __NOTEBOOK_ARCHIVE_CONFIG_CODE__
 
-            DEFAULT_STAGE5_MODEL_DIR = default_upstream_path(
-                "stage5_colab",
-                "learner",
-                preferred_run_prefix=f"{AUTHOR_NAME}-stage5",
-            )
-            DEFAULT_STAGE6_BALANCER_DIR = default_upstream_path(
-                "stage6_colab",
-                "balancer",
-                preferred_run_prefix=f"{AUTHOR_NAME}-stage6",
-            )
             DEFAULT_STAGE4_CONTROL_EVAL = default_upstream_path(
                 "stage4_colab",
                 "control_eval.json",
@@ -4124,14 +4114,20 @@ def stage9_config_code() -> str:
                 "hybrid_eval.json",
                 preferred_run_prefix=f"{AUTHOR_NAME}-stage8-2",
             )
-            STAGE5_MODEL_DIR = DEFAULT_STAGE5_MODEL_DIR
-            STAGE6_BALANCER_DIR = DEFAULT_STAGE6_BALANCER_DIR
-            CONTROL_EVAL_PATH = DEFAULT_STAGE4_CONTROL_EVAL
             COMPARISON_BASELINE_EVAL_PATH = DEFAULT_STAGE8_2_EVAL or DEFAULT_STAGE7_EVAL or DEFAULT_STAGE5_EVAL
             SAFETY_ANCHOR_EVAL_PATH = DEFAULT_STAGE4_CONTROL_EVAL
+            BASE_MODEL_NAME = "distilbert-base-uncased"
 
             TRAIN_BATCH_SIZE = 16
             EVAL_BATCH_SIZE = 32
+            PROPOSAL_TRAIN_BATCH_SIZE = 8
+            SUPPORT_TRAIN_BATCH_SIZE = 16
+            PROPOSAL_EPOCHS = 2
+            SUPPORT_EPOCHS = 2
+            PROPOSAL_LR = 2e-5
+            SUPPORT_LR = 2e-5
+            PROPOSAL_WEIGHT_DECAY = 0.01
+            SUPPORT_WEIGHT_DECAY = 0.01
             ACTION_EPOCHS = 16
             ACTION_LR = 2e-3
             ACTION_WEIGHT_DECAY = 0.01
@@ -4147,12 +4143,10 @@ def stage9_config_code() -> str:
             ACTION_LOSS_WEIGHT = 1.0
             UTILITY_LOSS_WEIGHT = 0.5
             RISK_LOSS_WEIGHT = 1.25
+            ABSTAIN_LOSS_WEIGHT = 0.5
+            RISK_PENALTY = 1.0
             TAIL_RISK_WEIGHT = 3.0
-            INITIAL_UNSAFE_DUAL = 1.0
-            INITIAL_OVERABSTAIN_DUAL = 1.0
-            UNSAFE_DUAL_LR = 0.25
-            OVERABSTAIN_DUAL_LR = 0.25
-            HARD_RISK_SHIELD = 0.30
+            RANDOMIZATION_SCALE = 0.10
             HARD_SUPPORT_THRESHOLD_OVERRIDE = None
             CLEAN_SPLITTING = True
             SEED = 42
@@ -4166,21 +4160,6 @@ def stage9_config_code() -> str:
 
             STAGE9_DIR = OUTPUT_ROOT / "stage9-risk-generalization"
             STAGE9_EVAL = OUTPUT_ROOT / "stage9_eval.json"
-
-            if STAGE5_MODEL_DIR is not None:
-                STAGE5_MODEL_DIR = Path(STAGE5_MODEL_DIR).expanduser().resolve()
-                if not STAGE5_MODEL_DIR.exists():
-                    raise FileNotFoundError(f"Stage 5 model directory not found: {STAGE5_MODEL_DIR}")
-
-            if CONTROL_EVAL_PATH is not None:
-                CONTROL_EVAL_PATH = Path(CONTROL_EVAL_PATH).expanduser().resolve()
-                if not CONTROL_EVAL_PATH.exists():
-                    raise FileNotFoundError(f"Stage 4 control eval not found: {CONTROL_EVAL_PATH}")
-
-            if STAGE6_BALANCER_DIR is not None:
-                STAGE6_BALANCER_DIR = Path(STAGE6_BALANCER_DIR).expanduser().resolve()
-                if not STAGE6_BALANCER_DIR.exists():
-                    raise FileNotFoundError(f"Stage 6 balancer directory not found: {STAGE6_BALANCER_DIR}")
 
             if COMPARISON_BASELINE_EVAL_PATH is not None:
                 COMPARISON_BASELINE_EVAL_PATH = Path(COMPARISON_BASELINE_EVAL_PATH).expanduser().resolve()
@@ -4235,11 +4214,8 @@ def stage9_config_code() -> str:
 
 
             def build_train_command(
-                stage5_model_dir: Path,
-                control_eval_path: Path,
                 output_dir: Path,
                 *,
-                stage6_controller_dir: Path | None,
                 max_train_samples: int | None,
                 max_eval_samples: int | None,
                 num_train_epochs: int,
@@ -4247,16 +4223,30 @@ def stage9_config_code() -> str:
                 cmd = [
                     sys.executable,
                     "-m",
-                    "keelnet.action",
+                    "keelnet.stage9",
                     "train",
-                    "--stage5-model-path",
-                    str(stage5_model_dir),
-                    "--control-path",
-                    str(control_eval_path),
+                    "--base-model-name",
+                    str(BASE_MODEL_NAME),
                     "--output-dir",
                     str(output_dir),
                     "--seed",
                     str(SEED),
+                    "--proposal-train-batch-size",
+                    str(PROPOSAL_TRAIN_BATCH_SIZE),
+                    "--support-train-batch-size",
+                    str(SUPPORT_TRAIN_BATCH_SIZE),
+                    "--proposal-learning-rate",
+                    str(PROPOSAL_LR),
+                    "--support-learning-rate",
+                    str(SUPPORT_LR),
+                    "--proposal-weight-decay",
+                    str(PROPOSAL_WEIGHT_DECAY),
+                    "--support-weight-decay",
+                    str(SUPPORT_WEIGHT_DECAY),
+                    "--proposal-num-train-epochs",
+                    str(PROPOSAL_EPOCHS),
+                    "--support-num-train-epochs",
+                    str(SUPPORT_EPOCHS),
                     "--train-batch-size",
                     str(TRAIN_BATCH_SIZE),
                     "--eval-batch-size",
@@ -4275,31 +4265,31 @@ def stage9_config_code() -> str:
                     str(MAX_CANDIDATES_PER_EXAMPLE),
                     "--max-candidates-per-feature",
                     str(MAX_CANDIDATES_PER_FEATURE),
-                    "--action-loss-weight",
-                    str(ACTION_LOSS_WEIGHT),
                     "--utility-loss-weight",
                     str(UTILITY_LOSS_WEIGHT),
                     "--risk-loss-weight",
                     str(RISK_LOSS_WEIGHT),
                     "--tail-risk-weight",
                     str(TAIL_RISK_WEIGHT),
+                    "--randomization-scale",
+                    str(RANDOMIZATION_SCALE),
                     "--max-unsupported-answer-rate",
                     str(MAX_UNSUPPORTED_ANSWER_RATE),
                     "--max-overabstain-rate",
                     str(MAX_OVERABSTAIN_RATE),
-                    "--unsafe-dual-init",
-                    str(INITIAL_UNSAFE_DUAL),
-                    "--overabstain-dual-init",
-                    str(INITIAL_OVERABSTAIN_DUAL),
-                    "--unsafe-dual-lr",
-                    str(UNSAFE_DUAL_LR),
-                    "--overabstain-dual-lr",
-                    str(OVERABSTAIN_DUAL_LR),
-                    "--hard-risk-threshold",
-                    str(HARD_RISK_SHIELD),
+                    "--joint-loss-weight",
+                    str(ACTION_LOSS_WEIGHT),
+                    "--abstain-loss-weight",
+                    str(ABSTAIN_LOSS_WEIGHT),
+                    "--risk-penalty",
+                    str(RISK_PENALTY),
+                    "--abstain-margin-min",
+                    "0.0",
+                    "--abstain-margin-max",
+                    "0.50",
+                    "--abstain-margin-step",
+                    "0.05",
                 ]
-                if stage6_controller_dir is not None:
-                    cmd.extend(["--stage6-controller-path", str(stage6_controller_dir)])
                 maybe_add_flag(cmd, "--clean-splitting", CLEAN_SPLITTING)
                 maybe_add_arg(cmd, "--hard-support-threshold", HARD_SUPPORT_THRESHOLD_OVERRIDE)
                 maybe_add_arg(cmd, "--max-train-samples", max_train_samples)
@@ -4310,24 +4300,17 @@ def stage9_config_code() -> str:
 
             def build_eval_command(
                 model_dir: Path,
-                stage5_model_dir: Path,
-                control_eval_path: Path,
                 output_path: Path,
                 *,
-                stage6_controller_dir: Path | None,
                 max_eval_samples: int | None,
             ) -> list[str]:
                 cmd = [
                     sys.executable,
                     "-m",
-                    "keelnet.action",
+                    "keelnet.stage9",
                     "evaluate",
                     "--model-path",
                     str(model_dir),
-                    "--stage5-model-path",
-                    str(stage5_model_dir),
-                    "--control-path",
-                    str(control_eval_path),
                     "--output-path",
                     str(output_path),
                     "--seed",
@@ -4344,9 +4327,13 @@ def stage9_config_code() -> str:
                     str(MAX_UNSUPPORTED_ANSWER_RATE),
                     "--max-overabstain-rate",
                     str(MAX_OVERABSTAIN_RATE),
+                    "--abstain-margin-min",
+                    "0.0",
+                    "--abstain-margin-max",
+                    "0.50",
+                    "--abstain-margin-step",
+                    "0.05",
                 ]
-                if stage6_controller_dir is not None:
-                    cmd.extend(["--stage6-controller-path", str(stage6_controller_dir)])
                 maybe_add_flag(cmd, "--clean-splitting", CLEAN_SPLITTING)
                 maybe_add_arg(cmd, "--hard-support-threshold", HARD_SUPPORT_THRESHOLD_OVERRIDE)
                 maybe_add_arg(cmd, "--max-eval-samples", max_eval_samples)
@@ -4354,48 +4341,32 @@ def stage9_config_code() -> str:
                 return cmd
 
 
-            if STAGE5_MODEL_DIR is None or CONTROL_EVAL_PATH is None:
-                SMOKE_TEST_COMMANDS = []
-                STAGE_COMMANDS = []
-            else:
-                smoke_model_dir = OUTPUT_ROOT / "smoke-stage9-controller"
-                smoke_eval_path = OUTPUT_ROOT / "smoke-stage9-eval.json"
-                smoke_train_command = build_train_command(
-                    STAGE5_MODEL_DIR,
-                    CONTROL_EVAL_PATH,
-                    smoke_model_dir,
-                    stage6_controller_dir=STAGE6_BALANCER_DIR,
-                    max_train_samples=SMOKE_TEST_TRAIN_SAMPLES,
-                    max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
-                    num_train_epochs=SMOKE_TEST_EPOCHS,
-                )
-                smoke_eval_command = build_eval_command(
-                    smoke_model_dir,
-                    STAGE5_MODEL_DIR,
-                    CONTROL_EVAL_PATH,
-                    smoke_eval_path,
-                    stage6_controller_dir=STAGE6_BALANCER_DIR,
-                    max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
-                )
-                stage_train_command = build_train_command(
-                    STAGE5_MODEL_DIR,
-                    CONTROL_EVAL_PATH,
-                    STAGE9_DIR,
-                    stage6_controller_dir=STAGE6_BALANCER_DIR,
-                    max_train_samples=MAX_TRAIN_SAMPLES,
-                    max_eval_samples=MAX_EVAL_SAMPLES,
-                    num_train_epochs=ACTION_EPOCHS,
-                )
-                stage_eval_command = build_eval_command(
-                    STAGE9_DIR,
-                    STAGE5_MODEL_DIR,
-                    CONTROL_EVAL_PATH,
-                    STAGE9_EVAL,
-                    stage6_controller_dir=STAGE6_BALANCER_DIR,
-                    max_eval_samples=MAX_EVAL_SAMPLES,
-                )
-                SMOKE_TEST_COMMANDS = [smoke_train_command, smoke_eval_command]
-                STAGE_COMMANDS = [stage_train_command, stage_eval_command]
+            smoke_model_dir = OUTPUT_ROOT / "smoke-stage9-controller"
+            smoke_eval_path = OUTPUT_ROOT / "smoke-stage9-eval.json"
+            smoke_train_command = build_train_command(
+                smoke_model_dir,
+                max_train_samples=SMOKE_TEST_TRAIN_SAMPLES,
+                max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
+                num_train_epochs=SMOKE_TEST_EPOCHS,
+            )
+            smoke_eval_command = build_eval_command(
+                smoke_model_dir,
+                smoke_eval_path,
+                max_eval_samples=SMOKE_TEST_EVAL_SAMPLES,
+            )
+            stage_train_command = build_train_command(
+                STAGE9_DIR,
+                max_train_samples=MAX_TRAIN_SAMPLES,
+                max_eval_samples=MAX_EVAL_SAMPLES,
+                num_train_epochs=ACTION_EPOCHS,
+            )
+            stage_eval_command = build_eval_command(
+                STAGE9_DIR,
+                STAGE9_EVAL,
+                max_eval_samples=MAX_EVAL_SAMPLES,
+            )
+            SMOKE_TEST_COMMANDS = [smoke_train_command, smoke_eval_command]
+            STAGE_COMMANDS = [stage_train_command, stage_eval_command]
 
             RUN_MARKER_FILE.write_text(
                 "\\n".join(
@@ -4408,9 +4379,7 @@ def stage9_config_code() -> str:
                         f"project_storage_dir={PROJECT_STORAGE_DIR}",
                         f"git_branch={CURRENT_BRANCH}",
                         f"seed={SEED}",
-                        f"stage5_model_dir={STAGE5_MODEL_DIR}",
-                        f"stage6_balancer_dir={STAGE6_BALANCER_DIR}",
-                        f"control_eval_path={CONTROL_EVAL_PATH}",
+                        f"base_model_name={BASE_MODEL_NAME}",
                         f"comparison_baseline_eval_path={COMPARISON_BASELINE_EVAL_PATH}",
                         f"safety_anchor_eval_path={SAFETY_ANCHOR_EVAL_PATH}",
                         "status=configured",
@@ -4432,16 +4401,13 @@ def stage9_config_code() -> str:
             print(f"Executed notebook target: {EXECUTED_NOTEBOOK_PATH}")
             print(f"Run marker file: {RUN_MARKER_FILE}")
             print(f"Seed: {SEED}")
-            print(f"Stage 5 model dir: {STAGE5_MODEL_DIR}")
-            print(f"Stage 6 balancer dir: {STAGE6_BALANCER_DIR}")
-            print(f"Stage 4 control eval path: {CONTROL_EVAL_PATH}")
+            print(f"Base model name: {BASE_MODEL_NAME}")
             print(f"Comparison baseline eval path: {COMPARISON_BASELINE_EVAL_PATH}")
             print(f"Safety anchor eval path: {SAFETY_ANCHOR_EVAL_PATH}")
             print(f"Planned Stage 9 model dir: {STAGE9_DIR}")
             print(f"Planned Stage 9 eval file: {STAGE9_EVAL}")
             print(f"Max unsupported-answer rate: {MAX_UNSUPPORTED_ANSWER_RATE}")
             print(f"Max over-abstain rate: {MAX_OVERABSTAIN_RATE}")
-            print(f"Hard risk shield: {HARD_RISK_SHIELD}")
             print(f"Hard support threshold override: {HARD_SUPPORT_THRESHOLD_OVERRIDE}")
             print(f"CUDA available: {torch.cuda.is_available()}")
             if torch.cuda.is_available():
@@ -4449,16 +4415,10 @@ def stage9_config_code() -> str:
             print("Target metrics:", ", ".join(TARGET_METRICS))
             print("Suggested modules:", ", ".join(SUGGESTED_MODULES))
 
-            if STAGE5_MODEL_DIR is None:
-                print("Set STAGE5_MODEL_DIR before running Stage 9.")
-            if STAGE6_BALANCER_DIR is None:
-                print("Stage 6 balancer not found. Stage 9 will still run, but without the Stage 6 prior feature.")
-            if CONTROL_EVAL_PATH is None:
-                print("Set CONTROL_EVAL_PATH before running Stage 9.")
             if COMPARISON_BASELINE_EVAL_PATH is None:
                 print("No Stage 8.2 or Stage 7 baseline eval was found automatically. Add one if you want a direct comparison anchor.")
             if SAFETY_ANCHOR_EVAL_PATH is None:
-                print("No Stage 4 control eval was found automatically. Add one if you want the modular safety anchor in the same run notes.")
+                print("No optional Stage 4 safety-anchor eval was found automatically. Add one only if you want that modular comparison in the same run notes.")
             """
         ).replace("__NOTEBOOK_ARCHIVE_CONFIG_CODE__", NOTEBOOK_ARCHIVE_CONFIG_CODE.rstrip()).strip()
         + "\n"
@@ -5091,7 +5051,7 @@ GENERIC_STAGES = [
             "comparison against Stage 5 and Stage 7",
         ],
         "hints": [
-            "input: frozen Stage 5 candidate answers plus the Stage 4 calibrated control artifact and optional Stage 6 prior",
+            "input: question and evidence only; Stage 9 trains its own proposal and support stack internally",
             "output: a risk-budgeted action learner with a hard calibrated support shield",
             "success means a better answer-quality versus groundedness balance than raw Stage 5 and plain Stage 7",
         ],
@@ -5237,7 +5197,7 @@ GENERIC_STAGES = [
         "branch": "main",
         "stage_number": 9,
         "stage_label": "Stage 9: Risk Generalization",
-        "objective": "Apply the current Stage 9 Mermaid logic on top of the existing Stage 8.2 action path and test whether stronger tail-risk control improves held-out safety transfer without collapsing answerable utility.",
+        "objective": "Run the exact isolated Stage 9 Mermaid logic in a dedicated module and test whether stronger tail-risk control improves held-out safety transfer without collapsing answerable utility.",
         "metrics": [
             "overall F1",
             "answerable F1",
@@ -5248,11 +5208,11 @@ GENERIC_STAGES = [
             "comparison against Stage 8.2 and Stage 4",
         ],
         "hints": [
-            "input: frozen Stage 5 candidate answers plus the Stage 4 calibrated control artifact and optional Stage 6 prior",
+            "input: question and evidence only; Stage 9 trains its own proposal and support stack internally",
             "logic: candidate plus uncertainty features feed utility, risk, and abstain heads before support shielding and the final answer-versus-abstain boundary",
             "success means a smaller validation-to-held-out safety gap than Stage 8.2 while keeping answerable F1 meaningfully above the Stage 4 anchor",
         ],
-        "modules": ["keelnet.action", "keelnet.learn", "keelnet.control", "keelnet.verify", "keelnet.metrics"],
+        "modules": ["keelnet.stage9"],
         "template_path": DEFAULT_GENERIC_NOTEBOOK_TEMPLATE,
         "notes_markdown": (
             dedent(
@@ -5261,13 +5221,13 @@ GENERIC_STAGES = [
 
                 ### Goal
 
-                Treat Stage 9 as a hardening pass over the Stage 8.2 action learner: keep the same basic answer-versus-abstain formulation, but tune the current runnable path toward better held-out risk control.
+                Treat Stage 9 as a clean isolated architecture: keep the same answer-versus-abstain problem, but implement the Mermaid logic directly instead of routing through the old Stage 7 or Stage 8 action code.
 
                 ### Scope
 
-                - input: frozen Stage 5 candidate answers plus the Stage 4 calibrated control artifact and optional Stage 6 prior
+                - input: question and evidence only; Stage 9 trains its own proposal and support stack internally
                 - output: answer or `ABSTAIN`
-                - comparison: Stage 9 run versus Stage 8.2 first, with Stage 4 as the safety anchor
+                - comparison: Stage 9 run versus Stage 8.2 first, with Stage 4 as an optional safety anchor
 
                 ### Current Mermaid Logic
 
@@ -5287,16 +5247,15 @@ GENERIC_STAGES = [
 
                 ### What This Notebook Applies Today
 
-                - the existing `keelnet.action` training and evaluation path as the current implementation shell for that logic
-                - stronger tail-risk and threshold defaults than Stage 8.2
-                - direct comparison hooks for Stage 8.2 and the Stage 4 anchor
-                - a clean place to add deeper Stage 9 model changes later without losing the run workflow
+                - a dedicated `keelnet.stage9` training and evaluation path
+                - an internally trained proposal model that is frozen for Stage 9 candidate generation
+                - an internally trained support scorer plus Stage 9 support calibration
+                - optional comparison hooks for Stage 8.2 and the Stage 4 anchor
 
-                ### What This Notebook Does Not Pretend Yet
+                ### What This Notebook Still Does Not Add
 
-                - it does not claim that every current Mermaid box already has a dedicated new code path beyond the existing `keelnet.action` implementation
-                - it does not add online adaptation, fallback pipelines, or human-in-the-loop feedback
-                - it does not claim full Stage 9 architectural completion before those code changes exist
+                - online adaptation, fallback pipelines, or human-in-the-loop feedback
+                - broad domain-shift claims beyond the current controlled benchmark
 
                 ### Handoff Condition
 
@@ -5312,9 +5271,9 @@ GENERIC_STAGES = [
 
                 Set `AUTHOR_NAME` to your name. This notebook builds the stage-specific `RUN_NAME` automatically as `yourname-stage9-v1`, `yourname-stage9-v2`, `yourname-stage9-v3`, and so on based on completed runs.
 
-                This notebook tries to auto-fill `STAGE5_MODEL_DIR` from the latest completed Stage 5 run, `STAGE6_BALANCER_DIR` from the latest completed Stage 6 run, `CONTROL_EVAL_PATH` from the latest completed Stage 4 run, and `COMPARISON_BASELINE_EVAL_PATH` from Stage 8.2 first, then Stage 7, then Stage 5.
+                This notebook does not require any external Stage 5 or Stage 4 artifact to run. It only tries to auto-fill optional comparison paths from Stage 8.2 first, then Stage 7, then Stage 5 so you still have matched anchors when they exist.
 
-                The config cell keeps the run runnable on the current codebase while matching the current Stage 9 logic as closely as today’s code allows: frozen proposal model, calibrated support path, candidate plus uncertainty features, utility/risk/abstain decision heads, stronger tail-risk pressure, tighter threshold sweep, and comparison anchors. Review the printed paths and command lists before launching a full run.
+                The config cell now points to the isolated `keelnet.stage9` path as a self-contained pipeline: Stage 9 trains its own proposal model, trains its own support scorer, freezes both inside the run, then learns the candidate-level utility/risk/abstain decision layer with explicit risk calibration and a tighter abstain boundary. Review the printed base-model choice, hyperparameters, and command lists before launching a full run.
                 """
             ).strip()
             + "\n"
@@ -5331,32 +5290,32 @@ GENERIC_STAGES = [
         ),
         "implementation_banner": implementation_banner(
             9,
-            "run a Stage 8.2-style <code>keelnet.action</code> experiment with Stage 9 defaults that emphasize tail-risk control, finer threshold search, and cleaner comparisons to Stage 8.2 and Stage 4.",
+            "run the dedicated <code>keelnet.stage9</code> experiment that implements the current Stage 9 Mermaid architecture directly and compares it cleanly against Stage 8.2 and Stage 4.",
             "the held-out unsupported-answer behavior is safer than Stage 8.2 without giving back all of the learned answer-quality gains.",
-            "claiming a brand-new model architecture before the deeper Stage 9 code changes exist, broad domain-shift claims, online adaptation.",
+            "broad domain-shift claims, online adaptation, fallback deployment systems.",
         ),
         "implementation_markdown": (
             dedent(
                 """
                 ## IMPLEMENTATION 1: Train And Evaluate The Stage 9 Risk-Generalization Run
 
-                This is the main Stage 9 run section. Today it deliberately reuses the current `keelnet.action` implementation so the notebook stays runnable, but the intended logic follows the current Stage 9 diagram:
+                This is the main Stage 9 run section. It now uses the dedicated `keelnet.stage9` implementation rather than reusing the old action learner shell, and it follows the current Stage 9 diagram directly:
 
-                - frozen Stage 5 answer proposals
-                - calibrated Stage 4 support as the groundedness path
+                - Stage 9 trains and freezes its own answer proposal model
+                - Stage 9 trains and calibrates its own support scorer as the groundedness path
                 - candidate plus uncertainty features feeding utility, risk, and abstain heads
                 - candidate-set interaction cues strengthening abstention and optional domain cues strengthening risk sensitivity
                 - post-hoc risk calibration plus hard support shielding before final risk-adjusted action scoring
                 - a more conservative answer-versus-abstain decision boundary
 
-                The current runnable approximation in this notebook applies that logic through:
+                The isolated implementation applies that logic through:
 
-                - stronger tail-risk weighting than Stage 8.2
-                - slightly larger hidden layer and dropout for the decision model
-                - finer risk-threshold sweep during evaluation
-                - explicit comparison against the latest Stage 8.2 run and the Stage 4 safety anchor
-
-                If deeper Stage 9 model changes land later, keep using this notebook as the canonical run shell and update the config code rather than forking the workflow again.
+                - internal proposal-model training, then frozen Top-K candidate generation inside Stage 9
+                - internal support-scorer training plus support calibration inside Stage 9
+                - candidate plus uncertainty features, candidate-set interaction features, and optional domain/context features
+                - explicit utility, risk, and abstain heads
+                - post-hoc risk calibration plus a margin-based abstain boundary
+                - optional comparison against the latest Stage 8.2 run and the Stage 4 safety anchor
                 """
             ).strip()
             + "\n"

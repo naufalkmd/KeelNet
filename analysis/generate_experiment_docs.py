@@ -120,6 +120,15 @@ STAGE_SPECS: tuple[StageSpec, ...] = (
         partial_markers=("stage8-2-action-learner",),
     ),
     StageSpec(
+        key="stage9",
+        label="Stage 9",
+        artifact_dir="stage9_colab",
+        preferred_prefixes=("naufal-stage9", "yourname-stage9"),
+        required_paths=("stage9_eval.json",),
+        key_output_paths=("stage9_eval.json", "stage9-risk-generalization"),
+        partial_markers=("stage9-risk-generalization",),
+    ),
+    StageSpec(
         key="final_comparison",
         label="Final Comparison",
         artifact_dir="final_comparison_colab",
@@ -139,6 +148,7 @@ LABELS = {
     "stage7": "Stage 7 Action Learner",
     "stage8": "Stage 8 Hybrid",
     "stage8_2": "Stage 8.2 Action + Calibrated Support",
+    "stage9": "Stage 9 Risk Generalization",
 }
 
 
@@ -153,6 +163,7 @@ NOTEBOOK_TEMPLATE_PATHS: dict[str, str] = {
     "stage7": "stages/07-risk-budgeted-action-learning/notebooks/stage-07-risk-budgeted-action-learning-colab.ipynb",
     "stage8": "stages/08-joint-optimization/notebooks/stage-08-joint-optimization-colab.ipynb",
     "stage8_2": "stages/08-joint-optimization/notebooks/stage-08-2-action-learner-calibrated-support-colab.ipynb",
+    "stage9": "stages/09-risk-generalization/notebooks/stage-09-risk-generalization-colab.ipynb",
     "final_comparison": "analysis/notebooks/final-comparison-colab.ipynb",
 }
 
@@ -406,6 +417,7 @@ def collect_stage_rows(canonical_runs: dict[str, dict[str, Any] | None]) -> list
         ("stage7", "stage7", "risk_action_eval.json"),
         ("stage8", "stage8", "hybrid_eval.json"),
         ("stage8_2", "stage8_2", "hybrid_eval.json"),
+        ("stage9", "stage9", "stage9_eval.json"),
     ]
     for key, family, filename in file_rows:
         run = canonical_runs.get(key)
@@ -549,6 +561,9 @@ def generate_status_board(
     stage8_2_run = canonical_runs.get("stage8_2")
     stage8_2_row = next((row for row in rows if row["family"] == "stage8_2"), None)
     stage8_2_complete = bool(stage8_2_run and stage8_2_run["status"] == "complete" and stage8_2_row is not None)
+    stage9_run = canonical_runs.get("stage9")
+    stage9_row = next((row for row in rows if row["family"] == "stage9"), None)
+    stage9_complete = bool(stage9_run and stage9_run["status"] == "complete" and stage9_row is not None)
 
     lines: list[str] = []
     lines.append("# KeelNet Current Experiment Status")
@@ -587,12 +602,19 @@ def generate_status_board(
             f"`overall_f1 = {fmt(stage8_2_row['overall_f1'])}` and "
             f"`unsupported_answer_rate = {fmt(stage8_2_row['unsupported_answer_rate'])}`."
         )
+    if stage9_complete and stage9_row is not None:
+        lines.append(
+            f"- `Stage 9` now has a saved run on `{stage9_row['reported_split']}`: "
+            f"`overall_f1 = {fmt(stage9_row['overall_f1'])}`, "
+            f"`answerable_f1 = {fmt(stage9_row['answerable_f1'])}`, "
+            f"`unsupported_answer_rate = {fmt(stage9_row['unsupported_answer_rate'])}`."
+        )
     lines.append("")
     lines.append("## Current Frontier")
     lines.append("")
     lines.append("| Label | Split | Overall F1 | Answerable F1 | Unsupported answer rate | Abstain F1 |")
     lines.append("| --- | --- | ---: | ---: | ---: | ---: |")
-    for family in ("stage1", "stage4", "stage5", "stage6", "stage7", "stage8", "stage8_2"):
+    for family in ("stage1", "stage4", "stage5", "stage6", "stage7", "stage8", "stage8_2", "stage9"):
         for row in rows:
             if row["family"] == family:
                 lines.append(
@@ -624,7 +646,7 @@ def generate_status_board(
                 f"- `{item['path']}` is `{item['status']}`."
             )
     lines.append("")
-    lines.append("## Ready Inputs For A Clean Stage 8.2 Run")
+    lines.append("## Ready Inputs For A Clean Stage 9 Run")
     lines.append("")
     ready_paths = [
         ("Stage 4 control eval", find_ready_path(canonical_runs, "stage4", "control_eval.json")),
@@ -632,6 +654,8 @@ def generate_status_board(
         ("Stage 5 eval", find_ready_path(canonical_runs, "stage5", "learner_eval.json")),
         ("Optional Stage 6 balancer", find_ready_path(canonical_runs, "stage6", "balancer")),
         ("Stage 7 comparison eval", find_ready_path(canonical_runs, "stage7", "risk_action_eval.json")),
+        ("Stage 8.2 comparison eval", find_ready_path(canonical_runs, "stage8_2", "hybrid_eval.json")),
+        ("Stage 9 eval", find_ready_path(canonical_runs, "stage9", "stage9_eval.json")),
     ]
     for title, path in ready_paths:
         lines.append(f"- {title}: `{path}`" if path is not None else f"- {title}: missing")
@@ -672,6 +696,9 @@ def generate_full_audit(
     stage8_2_run = canonical_runs.get("stage8_2")
     stage8_2_row = next((row for row in rows if row["family"] == "stage8_2"), None)
     stage8_2_complete = bool(stage8_2_run and stage8_2_run["status"] == "complete" and stage8_2_row is not None)
+    stage9_run = canonical_runs.get("stage9")
+    stage9_row = next((row for row in rows if row["family"] == "stage9"), None)
+    stage9_complete = bool(stage9_run and stage9_run["status"] == "complete" and stage9_row is not None)
 
     lines: list[str] = []
     lines.append("# KeelNet Current Experiment Audit")
@@ -726,6 +753,20 @@ def generate_full_audit(
             f"`answerable_f1 = {fmt(stage8_2_row['answerable_f1'])}`, "
             f"`unsupported_answer_rate = {fmt(stage8_2_row['unsupported_answer_rate'])}`."
         )
+    if stage9_complete and stage9_row is not None:
+        lines.append(
+            f"- `Stage 9` now has a clean-split `{stage9_row['reported_split']}` result on disk: "
+            f"`overall_f1 = {fmt(stage9_row['overall_f1'])}`, "
+            f"`answerable_f1 = {fmt(stage9_row['answerable_f1'])}`, "
+            f"`unsupported_answer_rate = {fmt(stage9_row['unsupported_answer_rate'])}`."
+        )
+        if stage8_2_complete and stage8_2_row is not None:
+            lines.append(
+                f"- `Stage 9` is a modest safety improvement over `Stage 8.2` on held-out data, "
+                f"but it still trails `Stage 4`: `unsupported_answer_rate = {fmt(stage9_row['unsupported_answer_rate'])}` "
+                f"versus `{fmt(stage8_2_row['unsupported_answer_rate'])}` for `Stage 8.2` and "
+                f"`{fmt(next((row for row in rows if row['family'] == 'stage4'), {}).get('unsupported_answer_rate'))}` for `Stage 4`."
+            )
     lines.append("")
     lines.append("## Canonical Artifact Inventory")
     lines.append("")
@@ -756,12 +797,15 @@ def generate_full_audit(
             f"{fmt(row['unsupported_answer_rate'])} | {fmt(row['abstain_f1'])} | {fmt(row['answer_rate'])} |"
         )
     lines.append("")
-    if comparison_csv_rows:
+    if comparison_csv_rows and stage9_complete:
+        lines.append("Source: `final_comparison_colab` provides the saved comparison snapshot through `Stage 8.2`; the `Stage 9` row is added from the saved `stage9_eval.json` artifact.")
+        lines.append("")
+    elif comparison_csv_rows:
         lines.append("Source: `final_comparison_colab` exists and provides a saved comparison snapshot.")
         lines.append("")
     lines.append("## Stage Notes")
     lines.append("")
-    for stage_key in ("stage1", "stage2", "stage2_5", "stage3", "stage4", "stage5", "stage6", "stage7", "stage8", "stage8_2"):
+    for stage_key in ("stage1", "stage2", "stage2_5", "stage3", "stage4", "stage5", "stage6", "stage7", "stage8", "stage8_2", "stage9"):
         lines.append(f"### {STAGE_LABEL_FROM_KEY[stage_key]}")
         lines.append("")
         run = canonical_runs.get(stage_key)
@@ -884,6 +928,24 @@ def generate_full_audit(
                     lines.append(f"- Selected risk threshold: `{fmt(risk_threshold)}`.")
                 if final_split is not None:
                     lines.append(f"- Final reported split: `{final_split}`.")
+        if stage_key == "stage9":
+            path = run["path"] / "stage9_eval.json"
+            if path.exists():
+                data = load_json(path)
+                risk_threshold = data.get("selected_risk_threshold")
+                final_split = data.get("final_eval_split")
+                validation_metrics = maybe_metric_dict(data, "validation_metrics")
+                final_metrics = maybe_metric_dict(data, "final_metrics")
+                if risk_threshold is not None:
+                    lines.append(f"- Selected risk threshold: `{fmt(risk_threshold)}`.")
+                if final_split is not None:
+                    lines.append(f"- Final reported split: `{final_split}`.")
+                if validation_metrics is not None and final_metrics is not None:
+                    lines.append(
+                        f"- Validation-to-final unsupported-answer rate gap: "
+                        f"`{fmt(validation_metrics.get('unsupported_answer_rate'))}` -> "
+                        f"`{fmt(final_metrics.get('unsupported_answer_rate'))}`."
+                    )
         lines.append("")
 
     lines.append("## Local Runtime Vs Drive Storage")
@@ -920,6 +982,8 @@ def generate_full_audit(
         ("Stage 5 eval", find_ready_path(canonical_runs, "stage5", "learner_eval.json")),
         ("Optional Stage 6 balancer", find_ready_path(canonical_runs, "stage6", "balancer")),
         ("Stage 7 eval", find_ready_path(canonical_runs, "stage7", "risk_action_eval.json")),
+        ("Stage 8.2 eval", find_ready_path(canonical_runs, "stage8_2", "hybrid_eval.json")),
+        ("Stage 9 eval", find_ready_path(canonical_runs, "stage9", "stage9_eval.json")),
     ]
     for title, path in ready_items:
         lines.append(f"- {title}: `{path}`" if path is not None else f"- {title}: missing")
@@ -928,15 +992,15 @@ def generate_full_audit(
     lines.append("")
     lines.append("### Must-Have Before Strong Final Claims")
     lines.append("")
-    lines.append("- Run a same-split final comparison for `Stage 4`, `Stage 7`, and `Stage 8.2` under clean splitting so the strongest checkpoints are compared on the same final split.")
+    lines.append("- Run a same-split final comparison for `Stage 4`, `Stage 7`, `Stage 8.2`, and `Stage 9` under clean splitting so the strongest checkpoints are compared on the same final split.")
     lines.append("- Add simple external baselines to the final comparison, especially raw QA confidence thresholding and calibrated QA confidence thresholding.")
-    lines.append("- Run at least three seeds for `Stage 4`, `Stage 7`, and `Stage 8.2`, then report mean and standard deviation for overall `F_1`, answerable `F_1`, unsupported-answer rate, and abstain `F_1`.")
-    lines.append("- Run Stage 8.2 ablations to isolate what matters: frozen Stage 5 only, `+` calibrated Stage 4 support, `+/-` hard support shield, and optional `+/-` Stage 6 prior.")
+    lines.append("- Run at least three seeds for `Stage 4`, `Stage 7`, `Stage 8.2`, and `Stage 9`, then report mean and standard deviation for overall `F_1`, answerable `F_1`, unsupported-answer rate, and abstain `F_1`.")
+    lines.append("- Run Stage 9 ablations to isolate what matters: stronger tail-risk weight, finer threshold sweep, `+/-` hard support shield, and optional `+/-` Stage 6 prior.")
     lines.append("")
     lines.append("### Most Valuable Next")
     lines.append("")
-    lines.append("- Build one validation-to-final gap table for `Stage 4`, `Stage 7`, and `Stage 8.2`, including selected threshold, validation unsupported-answer rate, final unsupported-answer rate, validation overall `F_1`, and final overall `F_1`.")
-    lines.append("- Add one qualitative error slice covering false supported answers, over-abstentions, `Stage 4` correct versus `Stage 8.2` wrong cases, and examples where `Stage 8.2` improves answerability but loses groundedness.")
+    lines.append("- Build one validation-to-final gap table for `Stage 4`, `Stage 7`, `Stage 8.2`, and `Stage 9`, including selected threshold, validation unsupported-answer rate, final unsupported-answer rate, validation overall `F_1`, and final overall `F_1`.")
+    lines.append("- Add one qualitative error slice covering false supported answers, over-abstentions, `Stage 4` correct versus `Stage 9` wrong cases, and examples where `Stage 9` improves safety over `Stage 8.2` but still loses groundedness.")
     lines.append("- If time allows, rerun `Stage 5` on the same clean final split so the modular-versus-learned regime claim is fully apples-to-apples.")
     lines.append("")
     lines.append("### Best Execution Order")
@@ -944,14 +1008,15 @@ def generate_full_audit(
     lines.append("- `1.` Clean-split rerun of `Stage 4` in `stages/04-unsupported-confidence-control/notebooks/stage-04-unsupported-confidence-control-colab.ipynb`.")
     lines.append("- `2.` Clean-split rerun of `Stage 7` in `stages/07-risk-budgeted-action-learning/notebooks/stage-07-risk-budgeted-action-learning-colab.ipynb`.")
     lines.append("- `3.` Multi-seed reruns of `Stage 8.2` in `stages/08-joint-optimization/notebooks/stage-08-2-action-learner-calibrated-support-colab.ipynb`.")
-    lines.append("- `4.` Add threshold baselines and the new same-split rows to `analysis/notebooks/final-comparison-colab.ipynb`.")
-    lines.append("- `5.` Run `Stage 8.2` ablations only after the clean comparison table is stable.")
+    lines.append("- `4.` Multi-seed reruns of `Stage 9` in `stages/09-risk-generalization/notebooks/stage-09-risk-generalization-colab.ipynb`.")
+    lines.append("- `5.` Add threshold baselines and the new same-split rows to `analysis/notebooks/final-comparison-colab.ipynb`.")
+    lines.append("- `6.` Run `Stage 9` ablations only after the clean comparison table is stable.")
     lines.append("")
     lines.append("## Repo State Notes")
     lines.append("")
     lines.append(f"- Repo root: `{repo_root}`")
     lines.append(f"- Working tree state at generation time: `{repo_status}`")
-    lines.append("- The repo now has distinct notebook identities for `Stage 8 Hybrid` and `Stage 8.2 Action Learner + Calibrated Support`.")
+    lines.append("- The repo now has distinct notebook identities for `Stage 8 Hybrid`, `Stage 8.2 Action Learner + Calibrated Support`, and `Stage 9 Risk Generalization`.")
     lines.append("- The final-comparison notebook already distinguishes those variants and includes the newer plotting improvements.")
     lines.append("")
     lines.append("## Refresh")

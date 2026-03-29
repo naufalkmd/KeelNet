@@ -19,37 +19,41 @@ It is the canonical merged experiment doc and replaces the older standalone stat
 - The current saved late-stage runs do not meet the `20%` unsupported-answer budget on the reported comparison split.
 - `Stage 8 Hybrid` now has a saved eval, but it still trails `Stage 4`: `overall_f1 = 68.27` and `unsupported_answer_rate = 31.86`.
 - `Stage 8.2` now has a clean-split `test` result on disk: `overall_f1 = 68.16`, `answerable_f1 = 70.06`, `unsupported_answer_rate = 33.73`.
+- `Stage 9` now has a clean-split `test` result on disk: `overall_f1 = 68.15`, `answerable_f1 = 68.00`, `unsupported_answer_rate = 31.69`.
+- `Stage 9` is a modest safety improvement over `Stage 8.2` on held-out data, but it still trails `Stage 4`: `unsupported_answer_rate = 31.69` versus `33.73` for `Stage 8.2` and `27.59` for `Stage 4`.
 
 ## Canonical Artifact Inventory
 
-| Stage | Canonical run | Storage | Status | Raw notebook | Executed notebook | Key outputs |
-| --- | --- | --- | --- | --- | --- | --- |
-| Stage 1 | `codex-stage1-live-20260326-014652` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/01-grounded-abstention-baseline/notebooks/stage-01-grounded-abstention-baseline-colab.ipynb` | missing | `baseline_eval.json`, `abstain_eval.json`, `baseline`, `abstain` |
-| Stage 2 | `naufal-stage2-v2` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/02-evidence-support-verification/notebooks/stage-02-evidence-support-verification-colab.ipynb` | missing | `verifier_eval.json`, `verifier` |
-| Stage 2.5 | `naufal-stage2-5-v1` | local | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/02-evidence-support-verification/notebooks/stage-02-5-hard-negative-support-verification-colab.ipynb` | missing | `verifier_eval.json`, `verifier` |
-| Stage 3 | `naufal-stage3-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/03-confidence-calibration/notebooks/stage-03-confidence-calibration-colab.ipynb` | missing | `calibration_eval.json`, `qa_dev_reliability.png`, `support_dev_reliability.png` |
-| Stage 4 | `naufal-stage4-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/04-unsupported-confidence-control/notebooks/stage-04-unsupported-confidence-control-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/stage4_colab/naufal-stage4-v1/executed-notebook/naufal-stage4-v1-executed.ipynb` | `control_eval.json` |
-| Stage 5 | `naufal-stage5-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/05-retrieval-grounded-qa/notebooks/stage-05-support-constrained-learning-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/stage5_colab/naufal-stage5-v1/executed-notebook/naufal-stage5-v1-executed.ipynb` | `learner_eval.json`, `learner` |
-| Stage 6 | `naufal-stage6-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/06-adaptive-constraint-balancing/notebooks/stage-06-adaptive-constraint-balancing-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/stage6_colab/naufal-stage6-v1/executed-notebook/naufal-stage6-v1-executed.ipynb` | `balance_eval.json`, `balancer` |
-| Stage 7 | `naufal-stage7-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/07-risk-budgeted-action-learning/notebooks/stage-07-risk-budgeted-action-learning-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/stage7_colab/naufal-stage7-v1/executed-notebook/naufal-stage7-v1-executed.ipynb` | `risk_action_eval.json`, `risk-action-learner` |
-| Stage 8 Hybrid | `naufal-stage8-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/08-joint-optimization/notebooks/stage-08-joint-optimization-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/stage8_colab/naufal-stage8-v1/executed-notebook/naufal-stage8-v1-executed.ipynb` | `hybrid_eval.json`, `hybrid-controller` |
-| Stage 8.2 | `naufal-stage8-2-v1` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/08-joint-optimization/notebooks/stage-08-2-action-learner-calibrated-support-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/stage8_2_colab/naufal-stage8-2-v1/executed-notebook/naufal-stage8-2-v1-executed.ipynb` | `hybrid_eval.json`, `stage8-2-action-learner` |
-| Final Comparison | `naufal-final-comparison-v3` | Drive | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/analysis/notebooks/final-comparison-colab.ipynb` | `/mnt/g/My Drive/KeelNet/artifacts/final_comparison_colab/naufal-final-comparison-v3/executed-notebook/naufal-final-comparison-v3-executed.ipynb` | `comparison_metrics.csv`, `comparison_summary.json` |
+| Stage            | Canonical run                         | Storage | Status   | Raw notebook                                                                                                                                                            | Executed notebook                                                                                                                                   | Key outputs                                                                            |
+| ---------------- | ------------------------------------- | ------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Stage 1          | `codex-stage1-live-20260326-014652` | Drive   | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/01-grounded-abstention-baseline/notebooks/stage-01-grounded-abstention-baseline-colab.ipynb`          | missing                                                                                                                                             | `baseline_eval.json`, `abstain_eval.json`, `baseline`, `abstain`               |
+| Stage 2          | `naufal-stage2-v2`                  | Drive   | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/02-evidence-support-verification/notebooks/stage-02-evidence-support-verification-colab.ipynb`        | missing                                                                                                                                             | `verifier_eval.json`, `verifier`                                                   |
+| Stage 2.5        | `naufal-stage2-5-v1`                | local   | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/02-evidence-support-verification/notebooks/stage-02-5-hard-negative-support-verification-colab.ipynb` | missing                                                                                                                                             | `verifier_eval.json`, `verifier`                                                   |
+| Stage 3          | `naufal-stage3-v1`                  | Drive   | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/03-confidence-calibration/notebooks/stage-03-confidence-calibration-colab.ipynb`                      | missing                                                                                                                                             | `calibration_eval.json`, `qa_dev_reliability.png`, `support_dev_reliability.png` |
+| Stage 4          | `naufal-stage4-v1`                  | Drive   | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/04-unsupported-confidence-control/notebooks/stage-04-unsupported-confidence-control-colab.ipynb`      | `/mnt/g/My Drive/KeelNet/artifacts/stage4_colab/naufal-stage4-v1/executed-notebook/naufal-stage4-v1-executed.ipynb`                               | `control_eval.json`                                                                  |
+| Stage 5          | `naufal-stage5-v1`                  | Drive   | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/05-retrieval-grounded-qa/notebooks/stage-05-support-constrained-learning-colab.ipynb`                 | `/mnt/g/My Drive/KeelNet/artifacts/stage5_colab/naufal-stage5-v1/executed-notebook/naufal-stage5-v1-executed.ipynb`                               | `learner_eval.json`, `learner`                                                     |
+| Stage 6          | `naufal-stage6-v1`                  | Drive   | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/06-adaptive-constraint-balancing/notebooks/stage-06-adaptive-constraint-balancing-colab.ipynb`        | `/mnt/g/My Drive/KeelNet/artifacts/stage6_colab/naufal-stage6-v1/executed-notebook/naufal-stage6-v1-executed.ipynb`                               | `balance_eval.json`, `balancer`                                                    |
+| Stage 7          | `naufal-stage7-v1`                  | Drive   | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/07-risk-budgeted-action-learning/notebooks/stage-07-risk-budgeted-action-learning-colab.ipynb`        | `/mnt/g/My Drive/KeelNet/artifacts/stage7_colab/naufal-stage7-v1/executed-notebook/naufal-stage7-v1-executed.ipynb`                               | `risk_action_eval.json`, `risk-action-learner`                                     |
+| Stage 8 Hybrid   | `naufal-stage8-v1`                  | Drive   | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/08-joint-optimization/notebooks/stage-08-joint-optimization-colab.ipynb`                              | `/mnt/g/My Drive/KeelNet/artifacts/stage8_colab/naufal-stage8-v1/executed-notebook/naufal-stage8-v1-executed.ipynb`                               | `hybrid_eval.json`, `hybrid-controller`                                            |
+| Stage 8.2        | `naufal-stage8-2-v1`                | Drive   | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/08-joint-optimization/notebooks/stage-08-2-action-learner-calibrated-support-colab.ipynb`             | `/mnt/g/My Drive/KeelNet/artifacts/stage8_2_colab/naufal-stage8-2-v1/executed-notebook/naufal-stage8-2-v1-executed.ipynb`                         | `hybrid_eval.json`, `stage8-2-action-learner`                                      |
+| Stage 9          | `naufal-stage9-v1`                  | Drive   | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/09-risk-generalization/notebooks/stage-09-risk-generalization-colab.ipynb`                             | `/mnt/g/My Drive/KeelNet/artifacts/stage9_colab/naufal-stage9-v1/executed-notebook/naufal-stage9-v1-executed.ipynb`                               | `stage9_eval.json`, `stage9-risk-generalization`                                   |
+| Final Comparison | `naufal-final-comparison-v3`        | Drive   | complete | `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/analysis/notebooks/final-comparison-colab.ipynb`                                                             | `/mnt/g/My Drive/KeelNet/artifacts/final_comparison_colab/naufal-final-comparison-v3/executed-notebook/naufal-final-comparison-v3-executed.ipynb` | `comparison_metrics.csv`, `comparison_summary.json`                                |
 
 ## Headline Comparison Metrics
 
-| Label | Split | Overall F1 | Answerable F1 | Unsupported answer rate | Abstain F1 | Answer rate |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| Stage 1 Baseline | dev | 42.35 | 84.82 | 100.00 | 0.00 | 100.00 |
-| Stage 1 Abstain | dev | 69.40 | 66.76 | 27.97 | 72.98 | 51.24 |
-| Stage 4 Fixed Control | dev | 69.41 | 66.41 | 27.59 | 72.96 | 50.68 |
-| Stage 5 Learner | dev | 68.28 | 71.40 | 34.84 | 71.17 | 58.38 |
-| Stage 6 Adaptive Balance | dev | 67.62 | 69.70 | 34.45 | 71.12 | 57.77 |
-| Stage 7 Action Learner | dev | 67.66 | 69.95 | 34.62 | 71.11 | 57.99 |
-| Stage 8 Hybrid | dev | 68.27 | 68.39 | 31.86 | 71.71 | 54.91 |
-| Stage 8.2 Action + Calibrated Support | test | 68.16 | 70.06 | 33.73 | 71.09 | 56.72 |
+| Label                                 | Split | Overall F1 | Answerable F1 | Unsupported answer rate | Abstain F1 | Answer rate |
+| ------------------------------------- | ----- | ---------: | ------------: | ----------------------: | ---------: | ----------: |
+| Stage 1 Baseline                      | dev   |      42.35 |         84.82 |                  100.00 |       0.00 |      100.00 |
+| Stage 1 Abstain                       | dev   |      69.40 |         66.76 |                   27.97 |      72.98 |       51.24 |
+| Stage 4 Fixed Control                 | dev   |      69.41 |         66.41 |                   27.59 |      72.96 |       50.68 |
+| Stage 5 Learner                       | dev   |      68.28 |         71.40 |                   34.84 |      71.17 |       58.38 |
+| Stage 6 Adaptive Balance              | dev   |      67.62 |         69.70 |                   34.45 |      71.12 |       57.77 |
+| Stage 7 Action Learner                | dev   |      67.66 |         69.95 |                   34.62 |      71.11 |       57.99 |
+| Stage 8 Hybrid                        | dev   |      68.27 |         68.39 |                   31.86 |      71.71 |       54.91 |
+| Stage 8.2 Action + Calibrated Support | test  |      68.16 |         70.06 |                   33.73 |      71.09 |       56.72 |
+| Stage 9 Risk Generalization           | test  |      68.15 |         68.00 |                   31.69 |      71.67 |       54.63 |
 
-Source: `final_comparison_colab` exists and provides a saved comparison snapshot.
+Source: `final_comparison_colab` exists and provides a saved comparison snapshot through `Stage 8.2`; the `Stage 9` row is added from the saved `stage9_eval.json` artifact.
 
 ## Stage Notes
 
@@ -152,6 +156,20 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Selected risk threshold: `0.70`.
 - Final reported split: `test`.
 
+### Stage 9
+
+- Canonical run: `/mnt/g/My Drive/KeelNet/artifacts/stage9_colab/naufal-stage9-v1`
+- Storage: Drive
+- Status: complete
+- Raw repo notebook: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet/stages/09-risk-generalization/notebooks/stage-09-risk-generalization-colab.ipynb`
+- Executed notebook archive: `/mnt/g/My Drive/KeelNet/artifacts/stage9_colab/naufal-stage9-v1/executed-notebook/naufal-stage9-v1-executed.ipynb`.
+- Test: `overall_f1 = 68.15`, `answerable_f1 = 68.00`, `unsupported_answer_rate = 31.69`.
+- Test over-abstain rate: `22.37`.
+- Selected risk threshold: `0.85`.
+- Final reported split: `test`.
+- Validation-to-final unsupported-answer rate gap: `17.29` -> `31.69`.
+- Held-out verdict versus `Stage 8.2`: modest safety gain (`31.69` vs `33.73`) but lower answerable `F_1` (`68.00` vs `70.06`) and higher over-abstention (`22.37` vs `20.23`).
+
 ## Local Runtime Vs Drive Storage
 
 - Local runtime artifacts root: `/content/KeelNet-local/artifacts`
@@ -181,20 +199,22 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - Stage 5 eval: `/mnt/g/My Drive/KeelNet/artifacts/stage5_colab/naufal-stage5-v1/learner_eval.json`
 - Optional Stage 6 balancer: `/mnt/g/My Drive/KeelNet/artifacts/stage6_colab/naufal-stage6-v1/balancer`
 - Stage 7 eval: `/mnt/g/My Drive/KeelNet/artifacts/stage7_colab/naufal-stage7-v1/risk_action_eval.json`
+- Stage 8.2 eval: `/mnt/g/My Drive/KeelNet/artifacts/stage8_2_colab/naufal-stage8-2-v1/hybrid_eval.json`
+- Stage 9 eval: `/mnt/g/My Drive/KeelNet/artifacts/stage9_colab/naufal-stage9-v1/stage9_eval.json`
 
 ## Experiment Checklist
 
 ### Must-Have Before Strong Final Claims
 
-- Run a same-split final comparison for `Stage 4`, `Stage 7`, and `Stage 8.2` under clean splitting so the strongest checkpoints are compared on the same final split.
+- Run a same-split final comparison for `Stage 4`, `Stage 7`, `Stage 8.2`, and `Stage 9` under clean splitting so the strongest checkpoints are compared on the same final split.
 - Add simple external baselines to the final comparison, especially raw QA confidence thresholding and calibrated QA confidence thresholding.
-- Run at least three seeds for `Stage 4`, `Stage 7`, and `Stage 8.2`, then report mean and standard deviation for overall `F_1`, answerable `F_1`, unsupported-answer rate, and abstain `F_1`.
-- Run Stage 8.2 ablations to isolate what matters: frozen Stage 5 only, `+` calibrated Stage 4 support, `+/-` hard support shield, and optional `+/-` Stage 6 prior.
+- Run at least three seeds for `Stage 4`, `Stage 7`, `Stage 8.2`, and `Stage 9`, then report mean and standard deviation for overall `F_1`, answerable `F_1`, unsupported-answer rate, and abstain `F_1`.
+- Run Stage 9 ablations to isolate what matters: stronger tail-risk weight, finer threshold sweep, `+/-` hard support shield, and optional `+/-` Stage 6 prior.
 
 ### Most Valuable Next
 
-- Build one validation-to-final gap table for `Stage 4`, `Stage 7`, and `Stage 8.2`, including selected threshold, validation unsupported-answer rate, final unsupported-answer rate, validation overall `F_1`, and final overall `F_1`.
-- Add one qualitative error slice covering false supported answers, over-abstentions, `Stage 4` correct versus `Stage 8.2` wrong cases, and examples where `Stage 8.2` improves answerability but loses groundedness.
+- Build one validation-to-final gap table for `Stage 4`, `Stage 7`, `Stage 8.2`, and `Stage 9`, including selected threshold, validation unsupported-answer rate, final unsupported-answer rate, validation overall `F_1`, and final overall `F_1`.
+- Add one qualitative error slice covering false supported answers, over-abstentions, `Stage 4` correct versus `Stage 9` wrong cases, and examples where `Stage 9` improves safety over `Stage 8.2` but still loses groundedness.
 - If time allows, rerun `Stage 5` on the same clean final split so the modular-versus-learned regime claim is fully apples-to-apples.
 
 ### Best Execution Order
@@ -202,14 +222,15 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 - `1.` Clean-split rerun of `Stage 4` in `stages/04-unsupported-confidence-control/notebooks/stage-04-unsupported-confidence-control-colab.ipynb`.
 - `2.` Clean-split rerun of `Stage 7` in `stages/07-risk-budgeted-action-learning/notebooks/stage-07-risk-budgeted-action-learning-colab.ipynb`.
 - `3.` Multi-seed reruns of `Stage 8.2` in `stages/08-joint-optimization/notebooks/stage-08-2-action-learner-calibrated-support-colab.ipynb`.
-- `4.` Add threshold baselines and the new same-split rows to `analysis/notebooks/final-comparison-colab.ipynb`.
-- `5.` Run `Stage 8.2` ablations only after the clean comparison table is stable.
+- `4.` Multi-seed reruns of `Stage 9` in `stages/09-risk-generalization/notebooks/stage-09-risk-generalization-colab.ipynb`.
+- `5.` Add threshold baselines and the new same-split rows to `analysis/notebooks/final-comparison-colab.ipynb`.
+- `6.` Run `Stage 9` ablations only after the clean comparison table is stable.
 
 ## Repo State Notes
 
 - Repo root: `/mnt/c/Users/naufalkmd/Documents/GithubProjects/KeelNet`
 - Working tree state at generation time: `dirty`
-- The repo now has distinct notebook identities for `Stage 8 Hybrid` and `Stage 8.2 Action Learner + Calibrated Support`.
+- The repo now has distinct notebook identities for `Stage 8 Hybrid`, `Stage 8.2 Action Learner + Calibrated Support`, and `Stage 9 Risk Generalization`.
 - The final-comparison notebook already distinguishes those variants and includes the newer plotting improvements.
 
 ## Refresh
@@ -217,4 +238,3 @@ Source: `final_comparison_colab` exists and provides a saved comparison snapshot
 ```bash
 python analysis/generate_experiment_docs.py
 ```
-

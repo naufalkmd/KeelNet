@@ -26,6 +26,7 @@ keelnet-learn = "keelnet.learn:main"
 keelnet-balance = "keelnet.balance:main"
 keelnet-action = "keelnet.action:main"
 keelnet-hybrid = "keelnet.hybrid:main"
+keelnet-stage9 = "keelnet.stage9:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
